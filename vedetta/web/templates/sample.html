@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% set active = 'sources' %}
+{% block body %}
+<h1>{{ source.employer }}</h1>
+<p class="lede"><code>{{ source.platform }}</code> &middot;
+  <code>{{ source.identifier }}</code> &middot; {{ total }} postings returned</p>
+
+<div class="note">
+Read the titles and locations below. Do they belong to <strong>{{ source.employer }}</strong>?
+If anything looks like a different company, the identifier is wrong &mdash; do not confirm
+it. A wrong identifier produces a permanently empty or permanently foreign feed, and both
+are indistinguishable from a quiet employer.
+</div>
+
+<table>
+  <tr><th>Title</th><th>Location</th><th>Published</th></tr>
+  {% for p in preview %}
+  <tr>
+    <td>{% if p.url %}<a href="{{ p.url }}">{{ p.title }}</a>{% else %}{{ p.title }}{% endif %}</td>
+    <td class="small">{{ p.location or '' }}</td>
+    <td class="small muted mono">{{ p.published_at or '' }}</td>
+  </tr>
+  {% endfor %}
+</table>
+
+<div class="row">
+  <a class="btn" href="{{ url_for('config_edit', name='watchlist') }}">Confirm in watchlist.yaml</a>
+  <a href="{{ url_for('sources') }}">Back to sources</a>
+</div>
+<p class="small muted">Confirming is an edit to the configuration file: add
+<code>verified_on</code> and a short <code>verified_note</code> saying what you checked.
+Deliberately not a one-click button &mdash; the note is the record of who looked, when,
+and at what.</p>
+{% endblock %}

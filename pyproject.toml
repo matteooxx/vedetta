@@ -7,11 +7,14 @@ requires-python = ">=3.11"
 license = { text = "MIT" }
 dependencies = ["httpx>=0.27", "PyYAML>=6.0"]
 
+[project.optional-dependencies]
+# The daily run needs neither. Only the long-running interface does.
+ui = ["Flask>=3.0", "ruamel.yaml>=0.18"]
+dev = ["pytest>=8.0"]
+
 [project.scripts]
 vedetta = "vedetta.cli:main"
-
-[project.optional-dependencies]
-dev = ["pytest>=8.0"]
+vedetta-web = "vedetta.web.__main__:main"
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -19,3 +22,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["vedetta*"]
+
+[tool.setuptools.package-data]
+"vedetta.web" = ["templates/*.html"]

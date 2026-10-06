@@ -7,14 +7,17 @@ ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY vedetta ./vedetta
-RUN pip install --no-cache-dir .
+# One image serves both roles: the scheduled run and the long-running interface.
+# Two images would drift.
+RUN pip install --no-cache-dir ".[ui]" waitress
 
-COPY config ./config
+# Shipped examples. The real configuration is bind-mounted at /data/config, which is
+# also where the interface writes - so it must live outside the git worktree and be
+# writable by this uid.
+COPY config /app/config.defaults
 
-# Runs as a non-root user with a read-only root filesystem; only /data/runtime is
-# writable. Keep every write inside it.
 USER 1000:1000
-ENV VEDETTA_ROOT=/data
+ENV VEDETTA_ROOT=/data VEDETTA_CONFIG_DIR=/data/config
 
-ENTRYPOINT ["vedetta", "--root", "/data", "--config-dir", "/app/config"]
+ENTRYPOINT ["vedetta", "--root", "/data", "--config-dir", "/data/config"]
 CMD ["run"]

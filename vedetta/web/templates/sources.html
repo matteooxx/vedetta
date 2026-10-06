@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% set active = 'sources' %}
+{% block body %}
+<h1>Sources</h1>
+<p class="lede">An employer can have several routes. Where two exist, both are polled:
+if one goes quiet while the other still answers, that is a detected fault rather than
+a closed job.</p>
+
+<div class="note">
+<strong>A source is only polled once a human has confirmed it.</strong> While this tool
+was being built, two completely independent automated methods each returned a
+<em>different company</em> than the one asked for &mdash; one of them a road-paving
+contractor returned as an asset manager, another a vendor demo board whose only
+posting was titled "Test Position". Both looked like success. So <em>Sample</em> shows
+you real titles, and you decide.
+</div>
+
+<table>
+  <tr><th>Employer</th><th>Platform</th><th>Identifier</th><th>Confirmed</th>
+      <th>Health</th><th></th></tr>
+  {% for s in sources %}
+  <tr>
+    <td>{{ s.employer }}</td>
+    <td class="mono">{{ s.platform }}</td>
+    <td class="mono small">{{ s.identifier }}</td>
+    <td class="small">
+      {% if s.verified_on %}
+        {{ s.verified_on }}
+        <div class="muted">{{ s.verified_note or '' }}</div>
+      {% else %}
+        <span class="tag warning">not confirmed &mdash; never polled</span>
+      {% endif %}
+    </td>
+    <td class="small {{ 'blocking' if s.health=='error' else ('warning' if s.health=='empty' else ('positive' if s.health=='ok' else 'info')) }}">{{ s.health }}</td>
+    <td>
+      <form class="inline" method="post" action="{{ url_for('sample', source_id=s.id) }}">
+        <button class="ghost" type="submit">Sample</button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+
+<p class="small muted">Confirming a source means adding <code>verified_on</code> to it in
+<a href="{{ url_for('config_edit', name='watchlist') }}">watchlist.yaml</a>. The file is
+the source of truth; this page only reads it.</p>
+{% endblock %}

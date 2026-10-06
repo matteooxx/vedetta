@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% set active = 'postings' %}
+{% block body %}
+<h1>Postings</h1>
+<p class="lede">Everything the watch has seen. Labels explain the ranking in the digest;
+nothing here was filtered out, and nothing ever is.</p>
+
+<form class="row" method="get">
+  <input type="search" name="q" value="{{ q }}" placeholder="title, employer, location"
+         style="padding:6px 9px;border:1px solid var(--rule);border-radius:4px;
+                background:var(--paper);color:var(--ink);min-width:240px">
+  <select name="state" style="padding:6px;border:1px solid var(--rule);border-radius:4px;
+                             background:var(--paper);color:var(--ink)">
+    <option value="open"   {{ 'selected' if state=='open' }}>open</option>
+    <option value="closed" {{ 'selected' if state=='closed' }}>closed</option>
+    <option value="all"    {{ 'selected' if state=='all' }}>all</option>
+  </select>
+  <button class="ghost" type="submit">Filter</button>
+  <span class="muted small">{{ postings|length }} shown (most recent first, capped at 400)</span>
+</form>
+
+<table>
+  <tr><th>Employer</th><th>Posting</th><th>Labels</th><th>Triage</th></tr>
+  {% for p in postings %}
+  <tr>
+    <td>{{ p.employer }}<div class="small muted">{{ p.location or 'location not stated' }}</div></td>
+    <td>
+      {% if p.url %}<a href="{{ p.url }}">{{ p.title }}</a>{% else %}{{ p.title }}{% endif %}
+      {% if p.is_pipeline %}<span class="tag info">pipeline, not an opening</span>{% endif %}
+      {% if p.dup_of %}<span class="tag warning">possible duplicate of #{{ p.dup_of }}</span>{% endif %}
+      {% if p.closed_run %}<span class="tag warning">closed</span>{% endif %}
+      <div class="small muted">published {{ p.published_at or 'date not supplied' }}</div>
+    </td>
+    <td>
+      {% if p.labels %}
+        {% for l in p.labels %}
+          <span class="tag {{ l.severity }}" title="from {{ l.produced_by }}">{{ l.explain }}{% if l.value %} {{ l.value }}{% endif %}</span>
+        {% endfor %}
+      {% else %}<span class="small muted">no labels matched &mdash; shown unranked rather than dropped</span>{% endif %}
+    </td>
+    <td class="small">
+      {% for s in ['interested','applied','dismissed'] %}
+      <form class="inline" method="post" action="{{ url_for('triage', posting_id=p.id) }}">
+        <input type="hidden" name="state" value="{{ s }}">
+        <button class="ghost" style="padding:2px 7px;font-size:.78rem"
+          {% if p.triage == s %}style="padding:2px 7px;font-size:.78rem;background:var(--accent);color:#fff"{% endif %}
+          type="submit">{{ s }}</button>
+      </form>
+      {% endfor %}
+      {% if p.triage %}
+      <form class="inline" method="post" action="{{ url_for('triage', posting_id=p.id) }}">
+        <input type="hidden" name="state" value="clear">
+        <button class="ghost" style="padding:2px 7px;font-size:.78rem" type="submit">clear</button>
+      </form>
+      {% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}

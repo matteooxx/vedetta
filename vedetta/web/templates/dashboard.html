@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% set active = 'dash' %}
+{% block body %}
+<h1>Dashboard</h1>
+<p class="lede">The watch itself is a scheduled job, not this page. This is where you
+find out whether it ran and what it saw.</p>
+
+<div class="grid">
+  <div class="tile"><div class="n">{{ counts.postings }}</div><div class="k">open postings</div></div>
+  <div class="tile"><div class="n">{{ counts.polled }}</div><div class="k">sources polled</div></div>
+  <div class="tile"><div class="n">{{ counts.awaiting }}</div><div class="k">awaiting confirmation</div></div>
+  <div class="tile"><div class="n">{{ counts.employers }}</div><div class="k">employers</div></div>
+</div>
+
+<h2>Last run</h2>
+{% if last %}
+<p class="small">Run <strong>{{ last.id }}</strong> &middot; started {{ last.started_at }}
+  &middot; {{ 'finished ' ~ last.finished_at if last.finished_at else 'did not finish' }}
+  &middot; trigger <code>{{ last.trigger }}</code>
+  &middot; digest {{ 'sent' if last.digest_sent else 'not sent' }}</p>
+<table>
+  <tr><th>Employer</th><th>Platform</th><th>Outcome</th><th>Items</th><th>Detail</th></tr>
+  {% for p in polls %}
+  <tr>
+    <td>{{ p.employer }}</td>
+    <td class="mono">{{ p.platform }}</td>
+    <td class="{{ 'blocking' if p.outcome=='error' else ('warning' if p.outcome=='empty' else 'positive') }}">{{ p.outcome }}</td>
+    <td class="mono">{{ p.item_count if p.item_count is not none else '-' }}</td>
+    <td class="small muted">{{ p.error or '' }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p class="muted">No run recorded yet.</p>
+{% endif %}
+
+{% if unwatched %}
+<h2>Not watched</h2>
+<p class="small">These employers have no confirmed route. They are listed so the gap is
+visible &mdash; leaving them out would look exactly like having nothing to report.</p>
+<table>
+  {% for u in unwatched %}
+  <tr><td>{{ u.display_name }}</td>
+      <td class="small"><a href="{{ u.careers_url }}">{{ u.careers_url or '' }}</a></td></tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+<h2>Run now</h2>
+<p class="small">Polls every confirmed source immediately, using the same code as the
+scheduled run. It does not send mail &mdash; the scheduled run does that.</p>
+<form method="post" action="{{ url_for('run_now') }}">
+  <button type="submit">Run now</button>
+</form>
+{% endblock %}

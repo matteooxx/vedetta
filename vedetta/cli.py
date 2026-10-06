@@ -14,6 +14,7 @@ from . import config as config_mod
 from . import db as db_mod
 from . import run as run_mod
 from .digest import mail, render
+from .runlock import RunInProgress, acquire
 
 
 def _load(args):
@@ -42,7 +43,15 @@ def cmd_run(args) -> int:
     conn = db_mod.connect(cfg.db_path)
     config_mod.sync_watchlist(conn, cfg.watchlist)
 
-    report = run_mod.execute(conn, cfg, trigger=args.trigger, force_seed=args.seed)
+    lock_path = cfg.db_path.parent / "run.lock"
+    try:
+        with acquire(lock_path, owner=f"cli:{args.trigger}"):
+            report = run_mod.execute(conn, cfg, trigger=args.trigger,
+                                     force_seed=args.seed)
+    except RunInProgress as exc:
+        print(f"skipped: {exc}", file=sys.stderr)
+        conn.close()
+        return 3
     body = render.render_text(report, cfg)
     subject_line = render.subject(report, cfg.digest.get("subject_prefix", "Vedetta"))
 

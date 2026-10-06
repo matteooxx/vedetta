@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Vedetta{% endblock %}</title>
+<style>
+:root{
+  --paper:#fbfbf9; --ink:#14181f; --ink-soft:#4a5260; --rule:#d9d7d0;
+  --accent:#1f3a93; --accent-soft:#eef1fa;
+  --block:#9b2226; --warn:#8a5a00; --fit:#1b5e3f; --note:#4a5260;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --paper:#14161a; --ink:#e7e9ee; --ink-soft:#a0a7b4; --rule:#2c3038;
+    --accent:#8ca4ef; --accent-soft:#1b2130;
+    --block:#e4848a; --warn:#d8a93f; --fit:#78c99f; --note:#a0a7b4;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.55 var(--sans)}
+a{color:var(--accent)}
+header{border-bottom:1px solid var(--rule);padding:14px 16px;display:flex;
+  gap:18px;align-items:baseline;flex-wrap:wrap}
+header .brand{font-weight:700;letter-spacing:.02em}
+header .brand small{font-weight:400;color:var(--ink-soft);margin-left:8px}
+nav{display:flex;gap:14px;flex-wrap:wrap}
+nav a{text-decoration:none;color:var(--ink-soft);padding:2px 0;
+  border-bottom:2px solid transparent}
+nav a.on{color:var(--ink);border-bottom-color:var(--accent)}
+main{max-width:1080px;margin:0 auto;padding:22px 16px 60px}
+h1{font-size:1.45rem;margin:0 0 4px}
+h2{font-size:1.05rem;margin:28px 0 10px;padding-bottom:5px;
+  border-bottom:1px solid var(--rule)}
+.lede{color:var(--ink-soft);margin:0 0 22px}
+.grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+.tile{border:1px solid var(--rule);border-radius:6px;padding:12px 14px}
+.tile .n{font:600 1.7rem/1.1 var(--mono)}
+.tile .k{color:var(--ink-soft);font-size:.82rem}
+table{width:100%;border-collapse:collapse;font-size:.92rem}
+th,td{text-align:left;padding:7px 9px;border-bottom:1px solid var(--rule);
+  vertical-align:top}
+th{font-size:.76rem;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-soft)}
+code,.mono{font-family:var(--mono);font-size:.88em}
+.tag{display:inline-block;font:600 .72rem/1.5 var(--mono);padding:1px 6px;
+  border-radius:3px;border:1px solid currentColor;margin:1px 3px 1px 0}
+.blocking{color:var(--block)} .warning{color:var(--warn)}
+.positive{color:var(--fit)} .info{color:var(--note)}
+.flash{border:1px solid var(--rule);border-left-width:4px;border-radius:4px;
+  padding:10px 12px;margin:0 0 14px}
+.flash.ok{border-left-color:var(--fit)} .flash.error{border-left-color:var(--block)}
+.flash.warn{border-left-color:var(--warn)}
+button,.btn{font:inherit;background:var(--accent);color:#fff;border:0;
+  border-radius:4px;padding:6px 12px;cursor:pointer}
+button.ghost{background:transparent;color:var(--accent);
+  border:1px solid var(--rule)}
+textarea{width:100%;min-height:62vh;font-family:var(--mono);font-size:13px;
+  line-height:1.5;padding:12px;border:1px solid var(--rule);border-radius:6px;
+  background:var(--paper);color:var(--ink);resize:vertical}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:12px 0}
+.muted{color:var(--ink-soft)}
+.small{font-size:.86rem}
+.note{background:var(--accent-soft);border:1px solid var(--rule);
+  border-radius:6px;padding:11px 13px;margin:0 0 18px;font-size:.9rem}
+form.inline{display:inline}
+.split{display:grid;gap:14px;grid-template-columns:1fr 1fr}
+@media(max-width:760px){.split{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <span class="brand">Vedetta<small>the lookout sights; you decide</small></span>
+  <nav>
+    <a href="{{ url_for('dashboard') }}" class="{{ 'on' if active=='dash' }}">Dashboard</a>
+    <a href="{{ url_for('postings') }}" class="{{ 'on' if active=='postings' }}">Postings</a>
+    <a href="{{ url_for('sources') }}" class="{{ 'on' if active=='sources' }}">Sources</a>
+    <a href="{{ url_for('config_edit', name='watchlist') }}" class="{{ 'on' if active=='config' }}">Configuration</a>
+  </nav>
+</header>
+<main>
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% for category, message in messages %}
+    <div class="flash {{ category }}">{{ message }}</div>
+  {% endfor %}
+{% endwith %}
+{% block body %}{% endblock %}
+</main>
+</body>
+</html>
