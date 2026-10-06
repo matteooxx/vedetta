@@ -1,0 +1,50 @@
+# Vedetta settings. Copy to settings.yaml and edit; the example is the fallback.
+# Nothing here is specific to any person or job market.
+
+database: runtime/vedetta.db
+
+digest:
+  subject_prefix: Vedetta
+  # The server runs in UTC, so a fixed cron hour drifts by an hour across the
+  # European daylight-saving change. Store the zone and resolve at run time.
+  hour: "07:00"
+  timezone: Europe/Rome
+  to: []                 # or VEDETTA_MAIL_TO
+  sender: null           # or VEDETTA_MAIL_FROM
+  host: null             # or VEDETTA_SMTP_HOST
+  port: 587
+  user: null             # or VEDETTA_SMTP_USER
+  starttls: true
+  # The password is only ever read from VEDETTA_SMTP_PASSWORD.
+
+ranking:
+  # A transparent sum over labels. Edit freely; the digest shows the reasoning.
+  weights:
+    positive: 3
+    info: 0
+    warning: -2
+    blocking: -6
+
+discovery:
+  # All techniques run by default. Their failure modes are uncorrelated, which is
+  # the entire reason for running more than one.
+  manifest: true
+  redirect: true
+  markers: true
+  identifier_extraction: true
+  dns: true
+  sitemap: true
+  structured_data: true
+  headless_browser: false
+
+ai_worker:
+  # Optional, external, off by default. Extraction and labelling only - never a
+  # fit verdict. Its absence degrades the result and is reported; it never breaks
+  # a run.
+  url: null
+
+trackers:
+  # Optional: existing application records, read one-way. Never written to.
+  - path: null
+    format: markdown_pipe_table
+    columns: { employer: 1, role: 2, status: 7 }

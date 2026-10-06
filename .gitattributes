@@ -1,0 +1,7 @@
+# Normalise line endings so a file authored on Windows does not appear modified on
+# Linux. Set from the first commit: the operator's other projects have to pass
+# core.filemode=false to work around exactly this.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.ico binary

@@ -1,0 +1,126 @@
+# Rules are data, not code. Adding a gate means editing this file.
+#
+# Every rule carries an `explain` string, and that string is what appears in the
+# digest next to the posting. If you cannot write a one-line explanation a human
+# would accept, the rule is not ready.
+#
+# `field: title | body | all` picks what a rule reads. Default is `all`. The first
+# real run against two live boards labelled a "Senior Backend Engineer" as early
+# career, because the word "graduate" sits in nearly every description's boilerplate.
+# Level and cluster rules therefore read the title; gates read everything.
+#
+# `weight:` overrides the severity default for one rule. Use it so that being in a
+# target role cluster outweighs merely being at the right level - otherwise an
+# "Associate Renewals Manager" ranks alongside a "Cloud Engineer", which the first
+# real run did in fact do.
+#
+# Severity orders postings. It NEVER hides them. A posting that trips every gate in
+# this file still appears in the digest, lower down, with the reasons shown.
+
+profile:
+  # Your own constraints. Referenced by rules through `compare.field`.
+  languages: [en]
+  max_years_experience: 2
+
+rules:
+  # ---------------------------------------------------------------- gates
+  - id: language-gate
+    kind: gate
+    severity: blocking
+    explain: "requires a language outside the profile"
+    # `unless` is the heart of the engine. The difference between a language that is
+    # REQUIRED and one that is an ASSET decides whether a posting is dead or alive,
+    # and a rule without this clause gets it wrong roughly half the time.
+    when:
+      - '(?i)\b(fluent|fluency|native|proficien\w+|required|must speak)\b[^.]{0,60}\b(french|german|spanish|dutch|portuguese|italian|polish|swedish)\b'
+      - '(?i)\b(french|german|spanish|dutch|portuguese|italian|polish|swedish)\b[^.]{0,40}\b(required|mandatory|essential|compulsory|is a must)\b'
+    unless:
+      - '(?i)\b(french|german|spanish|dutch|portuguese|italian|polish|swedish)\b[^.]{0,50}\b(asset|a plus|advantage|nice to have|desirable|beneficial|bonus|preferred)\b'
+
+  - id: seniority-threshold
+    kind: gate
+    severity: warning
+    explain: "asks for more years than the profile has:"
+    extract: '(?i)(\d{1,2})\s*\+?\s*(?:-\s*\d{1,2}\s*)?years?\b'
+    compare: { operator: gt, field: max_years_experience }
+
+  - id: visa-not-sponsored
+    kind: gate
+    severity: blocking
+    explain: "states that sponsorship is not available"
+    when:
+      - '(?i)(without (visa )?sponsorship|no (visa )?sponsorship|not (able|be able) to sponsor|unable to sponsor|must (already )?have the right to work)'
+
+  - id: enrolment-required
+    kind: gate
+    severity: blocking
+    explain: "requires current university enrolment"
+    when:
+      - '(?i)(currently enrolled|must be enrolled|returning to (university|school)|pursuing a (bachelor|master).{0,30}degree)'
+
+  - id: coding-test-gate
+    kind: gate
+    severity: warning
+    explain: "screens with an algorithmic coding test"
+    when:
+      - '(?i)(coding (challenge|assessment|test)|technical assessment|hackerrank|codility|leetcode|live coding)'
+
+  # ------------------------------------------------------------- pipelines
+  - id: talent-pipeline
+    kind: pipeline
+    severity: info
+    explain: "a continuous pipeline, not a current opening"
+    when:
+      - '(?i)(talent (pool|community|pipeline)|no open requirement|speculative application|spontaneous application|general application|join our talent)'
+
+  # -------------------------------------------------------------- clusters
+  # These are positive signals. Rename, add or delete freely - they are the part
+  # most specific to one person's search.
+  - id: cluster-cloud-devops
+    field: title
+    weight: 5
+    kind: cluster
+    severity: positive
+    explain: "cloud / devops / SRE / platform"
+    when:
+      - '(?i)\b(cloud|devops|sre|site reliability|platform|infrastructure)\s+engineer\b'
+      - '(?i)\b(kubernetes|terraform|observability)\b'
+
+  - id: cluster-solutions-architecture
+    field: title
+    weight: 5
+    kind: cluster
+    severity: positive
+    explain: "solutions architecture"
+    when:
+      - '(?i)\b(solutions?|cloud)\s+architect\b'
+
+  - id: cluster-presales
+    field: title
+    weight: 5
+    kind: cluster
+    severity: positive
+    explain: "technical presales"
+    when:
+      - '(?i)\b(solutions?|presales|pre-sales|sales)\s+engineer\b'
+      - '(?i)\b(customer engineer|technical solutions consultant)\b'
+
+  - id: level-early-career
+    field: title
+    weight: 1
+    kind: cluster
+    severity: positive
+    explain: "explicitly early career"
+    when:
+      - '(?i)\b(graduate|new grad|entry[- ]level|early career|associate|junior|intern(ship)?)\b'
+
+  # ------------------------------------------------------------ exclusions
+  - id: out-of-track-sales
+    field: title
+    kind: gate
+    severity: blocking
+    explain: "a quota-carrying sales role, not a technical one"
+    when:
+      - '(?i)\b(account executive|business development representative|account development representative|sales development representative)\b'
+    unless:
+      - '(?i)\b(solutions?|sales|presales)\s+engineer\b'

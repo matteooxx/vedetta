@@ -1,0 +1,13 @@
+# Runtime and real configuration never enter the repository.
+runtime/
+datasets/
+config/settings.yaml
+config/watchlist.yaml
+config/rules.yaml
+*.db
+*.db-wal
+*.db-shm
+.env
+__pycache__/
+*.pyc
+.venv/

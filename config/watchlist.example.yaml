@@ -1,0 +1,40 @@
+# Who to watch. Replace entirely with your own.
+#
+# A source is polled ONLY if it has verified_on - a date on which a human looked
+# at real postings from it and confirmed they belong to this employer. This is not
+# ceremony: during design, two independent automated sources each returned a
+# different company, one of them a road-paving contractor returned as an asset
+# manager. An unverified source is stored and skipped.
+
+employers:
+  - key: gitlab
+    display_name: GitLab
+    channel: private
+    careers_url: https://about.gitlab.com/jobs/
+    sources:
+      - platform: greenhouse
+        identifier: gitlab
+        discovered_by: markers
+        verified_on: 2026-10-07
+        verified_note: "209 postings, titles consistent with the company"
+
+  - key: grafana-labs
+    display_name: Grafana Labs
+    channel: private
+    careers_url: https://grafana.com/about/careers/
+    sources:
+      - platform: greenhouse
+        identifier: grafanalabs
+        discovered_by: markers
+        verified_on: 2026-10-07
+        verified_note: "135 postings, observability roles as expected"
+
+  - key: example-unverified
+    display_name: Example Corp
+    channel: private
+    careers_url: https://example.com/careers
+    sources:
+      # No verified_on: stored, never polled, and listed as unwatched in the digest.
+      - platform: greenhouse
+        identifier: examplecorp
+        discovered_by: manifest
