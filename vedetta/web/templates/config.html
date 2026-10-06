@@ -1,90 +1,141 @@
 {% extends "base.html" %}
 {% set active = 'config' %}
+{% block title %}{{ name }}.yaml · Vedetta{% endblock %}
 {% block body %}
 <h1>Configuration</h1>
 <p class="lede">These files are the single source of truth. Editing here and editing them
-over SSH are the same act with different tools &mdash; there is no second copy and no
-import step.</p>
+over SSH are the same act with different tools — there is no second copy and no import
+step.</p>
 
-<nav class="row">
-  {% for n in ['watchlist','rules','settings'] %}
-    <a href="{{ url_for('config_edit', name=n) }}"
-       class="{{ 'btn' if n == name else '' }}"
-       style="{{ 'text-decoration:none' if n == name else '' }}">{{ n }}.yaml</a>
+<div class="segmented" role="group" aria-label="Configuration files">
+  {% for n, label in [('profile','profile — what you can take on'),
+                      ('rules','rules — what to look for'),
+                      ('watchlist','watchlist — who to watch'),
+                      ('settings','settings — how it runs')] %}
+    <a href="{{ url_for('config_edit', name=n) }}" class="{{ 'on' if n == name }}"
+       aria-current="{{ 'page' if n == name }}">{{ label }}</a>
   {% endfor %}
-</nav>
+</div>
 
 {% if is_example %}
 <div class="note">
   You are looking at <code>{{ name }}.example.yaml</code>, because
-  <code>{{ name }}.yaml</code> does not exist yet. Saving will create the real file;
-  the example stays untouched as a reference and as the fallback for a fresh install.
+  <code>{{ name }}.yaml</code> does not exist yet. Saving creates the real file; the
+  example stays untouched as a reference and as the fallback for a fresh install.
 </div>
 {% endif %}
 
 {% if conflict %}
 <div class="note">
   <strong>Nothing was overwritten.</strong> The file changed on disk while this form was
-  open. Your version is on the left, the version now on disk is on the right. Merge by
-  hand, then save &mdash; saving now will overwrite the disk version with what is in the
-  box on the left.
+  open. Yours is on the left, the version now on disk is on the right. Merge by hand,
+  then save — saving now replaces the disk version with the box on the left.
 </div>
 <div class="split">
-  <form method="post">
+  <form method="post" data-dirty-guard>
     <h2 style="margin-top:0">Yours</h2>
-    <textarea name="text" spellcheck="false">{{ text }}</textarea>
+    <label class="field" for="text-mine" style="display:block">
+      <span style="position:absolute;left:-9999px">{{ name }}.yaml, your version</span>
+    </label>
+    <textarea id="text-mine" name="text" spellcheck="false" autocomplete="off">{{ text }}</textarea>
     <input type="hidden" name="digest" value="{{ digest }}">
-    <div class="row"><button type="submit">Save mine, overwriting disk</button></div>
+    <div class="row"><button type="submit">Save Mine, Overwriting Disk</button></div>
   </form>
   <div>
     <h2 style="margin-top:0">Now on disk</h2>
-    <textarea readonly spellcheck="false">{{ conflict }}</textarea>
+    <textarea readonly spellcheck="false" aria-label="{{ name }}.yaml as it is now on disk">{{ conflict }}</textarea>
   </div>
 </div>
 {% else %}
-<form method="post">
-  <textarea name="text" spellcheck="false">{{ text }}</textarea>
+<form method="post" data-dirty-guard>
+  <div class="field">
+    <label for="text">{{ name }}.yaml</label>
+    <textarea id="text" name="text" spellcheck="false" autocomplete="off">{{ text }}</textarea>
+  </div>
   <input type="hidden" name="digest" value="{{ digest }}">
   <div class="row">
-    <button type="submit">Save</button>
-    <span class="small muted">
-      {% if path %}<code>{{ path }}</code> &middot; {% endif %}
-      validated before writing &middot; a timestamped backup is kept beside the file
-      &middot; a concurrent edit is detected, not overwritten
-    </span>
+    <button type="submit">Save {{ name }}.yaml</button>
+    <span class="small muted" id="dirty-hint" aria-live="polite"></span>
   </div>
+  <p class="small muted">
+    {% if path %}<code>{{ path }}</code><br>{% endif %}
+    Validated before writing · a timestamped backup is kept beside the file · a
+    concurrent edit is detected rather than overwritten.
+  </p>
 </form>
 {% endif %}
 
 <h2>What this file controls</h2>
-{% if name == 'watchlist' %}
+{% if name == 'profile' %}
+<p class="small">What you can actually take on: languages, work authorisation, level,
+and geography. It is what decides whether a posting is <strong>workable</strong>.</p>
+<ul class="small">
+  <li><code>locations</code> — four buckets. A posting usually lists several locations
+    and the <em>best</em> verdict wins, because one workable office makes the posting
+    workable. An unrecognised location is never excluded; it is shown and labelled
+    unclear.</li>
+  <li><code>experience.reject_level</code> — matched word by word against the title,
+    and tested <em>before</em> <code>accept_level</code>. The other order read
+    “Associate Renewals Manager” as junior.</li>
+  <li><code>tracks.require_match</code> — the most effective setting here and the most
+    likely to be wrong. It needs your cluster rules to be broad enough; check the
+    excluded list for a week before trusting it.</li>
+  <li><code>exclude_if</code> — only the rule ids you list make a posting unworkable.
+    Anything else stays a warning you can see and overrule.</li>
+</ul>
+<p class="small"><strong>Nothing is ever deleted.</strong> An excluded posting is counted,
+explained and one click away.</p>
+{% elif name == 'watchlist' %}
 <p class="small">Which employers to watch, on which platforms, with which identifiers. A
 source is polled only when it carries <code>verified_on</code>. Remove that line and the
-source stops being polled while staying visible as unwatched &mdash; which is the point:
-an employer you cannot watch should never look like an employer with nothing to say.</p>
+source stops being polled while staying visible as unwatched — which is the point: an
+employer you cannot watch should never look like an employer with nothing to say.</p>
 {% elif name == 'rules' %}
 <p class="small">What counts as a blocker, a warning or a good sign. Three keys matter
 most:</p>
 <ul class="small">
-  <li><code>unless</code> &mdash; the difference between a language that is
-    <em>required</em> and one that is <em>an asset</em>. Without it a language rule is
-    wrong about half the time.</li>
-  <li><code>field: title | body | all</code> &mdash; what the rule reads. The first real
-    run labelled a "Senior Backend Engineer" as early-career, because the word
-    "graduate" sits in nearly every long description's boilerplate.</li>
-  <li><code>weight</code> &mdash; so that being in a target role cluster outweighs merely
-    being at the right level. Without it an "Associate Renewals Manager" ranked alongside
-    a "Cloud Engineer", which actually happened.</li>
+  <li><code>unless</code> — the difference between a language that is <em>required</em>
+    and one that is <em>an asset</em>. Without it a language rule is wrong about half
+    the time.</li>
+  <li><code>field: title | body | all</code> — what the rule reads. The first real run
+    labelled a “Senior Backend Engineer” as early career, because the word “graduate”
+    sits in nearly every long description’s boilerplate.</li>
+  <li><code>weight</code> — so that being in a target role cluster outweighs merely
+    being at the right level.</li>
 </ul>
-<p class="small"><code>explain</code> is required on every rule, because it is what appears
-next to the posting in the digest. A rule you cannot explain in one line is a rule you
-cannot argue with.</p>
+<p class="small"><code>explain</code> is required on every rule, because it is what
+appears next to the posting. A rule you cannot explain in one line is a rule you cannot
+argue with.</p>
 {% else %}
 <p class="small">Database path, digest time and recipients, ranking weights, and which
-discovery techniques are enabled. Credentials are never here &mdash; they come from the
+discovery techniques are enabled. Credentials are never here — they come from the
 environment file only.</p>
 {% endif %}
+{% endblock %}
 
-<p class="small muted">Severity orders the digest. It never hides anything: a posting that
-trips every gate in the rule file still appears, lower down, with the reasons shown.</p>
+{% block scripts %}
+<script>
+// Warn before leaving with unsaved edits. This is a text editor for files that drive
+// a scheduled job; losing a half-finished rule file to a stray click is a real cost.
+(function () {
+  var form = document.querySelector('form[data-dirty-guard]');
+  if (!form) return;
+  var area = form.querySelector('textarea[name="text"]');
+  var hint = document.getElementById('dirty-hint');
+  if (!area) return;
+  var original = area.value;
+  var dirty = false;
+  function check() {
+    dirty = area.value !== original;
+    if (hint) hint.textContent = dirty ? 'Unsaved changes' : '';
+  }
+  area.addEventListener('input', check);
+  form.addEventListener('submit', function () { dirty = false; });
+  window.addEventListener('beforeunload', function (event) {
+    if (!dirty) return;
+    event.preventDefault();
+    event.returnValue = '';
+  });
+})();
+</script>
 {% endblock %}

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 from flask import (Flask, abort, flash, redirect, render_template, request,
@@ -26,9 +27,51 @@ ROOT = Path(os.environ.get("VEDETTA_ROOT", "."))
 CONFIG_DIR = Path(os.environ.get("VEDETTA_CONFIG_DIR", ROOT / "config"))
 
 
+MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun",
+          "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+
+def humanise(value) -> str:
+    """Turn a platform timestamp into something a person reads at a glance.
+
+    The platforms return half a dozen shapes - "2026-09-23T11:37:50-04:00",
+    "2026-10-6", a bare date. Showing those raw was the single most unfriendly thing
+    in the first interface: a column of ISO strings is data, not information.
+    """
+    if not value:
+        return "Date not supplied"
+    text = str(value).strip()
+    try:
+        head = text.replace("Z", "+00:00")
+        stamp = datetime.fromisoformat(head)
+    except ValueError:
+        try:
+            parts = [int(x) for x in text.split("T")[0].split("-")]
+            stamp = datetime(parts[0], parts[1], parts[2])
+        except Exception:
+            return text[:24]
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
+    days = (now - stamp).days
+    pretty = f"{stamp.day} {MONTHS[stamp.month - 1]} {stamp.year}"
+    if days < 0:
+        return pretty
+    if days == 0:
+        return "Today"
+    if days == 1:
+        return "Yesterday"
+    if days < 14:
+        return f"{days} days ago"
+    if days < 60:
+        return f"{pretty} · {days // 7} weeks ago"
+    return pretty
+
+
 def create_app() -> Flask:
     app = Flask(__name__)
     app.secret_key = os.environ.get("VEDETTA_SECRET_KEY") or os.urandom(32)
+    app.jinja_env.filters["when"] = humanise
 
     def load_config():
         return config_mod.load(ROOT, str(CONFIG_DIR))
@@ -78,21 +121,44 @@ def create_app() -> Flask:
         cfg = load_config()
         conn = open_db(cfg)
         state = request.args.get("state", "open")
+        scope = request.args.get("scope", "workable")
         query = request.args.get("q", "").strip()
 
-        sql = """SELECT p.*, e.display_name AS employer,
-                        (SELECT state FROM triage t WHERE t.posting_id = p.id) AS triage
-                 FROM posting p JOIN employer e ON e.id = p.employer_id
-                 WHERE 1=1"""
+        where = []
         params: list = []
         if state == "open":
-            sql += " AND p.closed_run IS NULL"
+            where.append("p.closed_run IS NULL")
         elif state == "closed":
-            sql += " AND p.closed_run IS NOT NULL"
+            where.append("p.closed_run IS NOT NULL")
         if query:
-            sql += " AND (p.title LIKE ? OR e.display_name LIKE ? OR p.location LIKE ?)"
+            where.append("(p.title LIKE ? OR e.display_name LIKE ? OR p.location LIKE ?)")
             params += [f"%{query}%"] * 3
-        sql += " ORDER BY p.id DESC LIMIT 400"
+
+        base = ("FROM posting p JOIN employer e ON e.id = p.employer_id"
+                + (" WHERE " + " AND ".join(where) if where else ""))
+
+        # Both counts come from the same filtered set, so the number on screen is
+        # exactly what the toggle would reveal. The excluded count is ALWAYS shown:
+        # folding postings away silently is the failure this whole project exists to
+        # prevent, and a visible number is the difference.
+        totals = conn.execute(
+            f"""SELECT
+                  sum(CASE WHEN p.workable=1 THEN 1 ELSE 0 END) AS workable,
+                  sum(CASE WHEN p.workable=0 THEN 1 ELSE 0 END) AS excluded
+                {base}""", params).fetchone()
+        counts = {"workable": totals["workable"] or 0,
+                  "excluded": totals["excluded"] or 0}
+
+        scoped = list(where)
+        if scope == "workable":
+            scoped.append("p.workable=1")
+        elif scope == "excluded":
+            scoped.append("p.workable=0")
+        sql = ("""SELECT p.*, e.display_name AS employer,
+                         (SELECT state FROM triage t WHERE t.posting_id = p.id) AS triage
+                  FROM posting p JOIN employer e ON e.id = p.employer_id"""
+               + (" WHERE " + " AND ".join(scoped) if scoped else "")
+               + " ORDER BY p.id DESC LIMIT 300")
 
         rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
         for row in rows:
@@ -100,8 +166,16 @@ def create_app() -> Flask:
                 """SELECT kind, severity, value, explain, produced_by
                    FROM label WHERE posting_id=? ORDER BY severity, rule_id""",
                 (row["id"],)).fetchall()]
+
+        reasons = [dict(r) for r in conn.execute(
+            f"""SELECT p.blocked_by AS reason, count(*) AS n {base}
+                {"AND" if where else "WHERE"} p.workable=0 AND p.blocked_by IS NOT NULL
+                GROUP BY p.blocked_by ORDER BY n DESC LIMIT 8""", params).fetchall()]
         conn.close()
-        return render_template("postings.html", postings=rows, state=state, q=query)
+        return render_template("postings.html", postings=rows, state=state,
+                               scope=scope, q=query, counts=counts,
+                               reasons=reasons,
+                               profile_on=cfg.profile.configured)
 
     @app.post("/postings/<int:posting_id>/triage")
     def triage(posting_id: int):

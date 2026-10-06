@@ -1,0 +1,172 @@
+# Your profile: what you can actually take on.
+#
+# This is the file that decides whether a posting is WORKABLE for you. It is kept
+# separate from rules.yaml on purpose: rules describe how to spot something in a
+# posting's text, this describes you.
+#
+# ---------------------------------------------------------------------------
+# NOTHING IS EVER DELETED.
+#
+# A posting excluded by this profile is counted, explained, and one click away. The
+# default view hides them so the list is usable; the number is always on screen so
+# you know what you are not looking at.
+#
+# That distinction is the whole design. A filter that drops a posting quietly fails
+# with no trace - nothing ever tells you it happened. A fold with a visible count
+# does not.
+# ---------------------------------------------------------------------------
+
+identity:
+  # Used in explanations and by the language gate in rules.yaml.
+  languages: [english]
+
+experience:
+  years: 1                   # roughly what you have
+  max_years_requested: 2     # a posting asking for more gets flagged
+
+  # Matched against the posting TITLE, word by word.
+  accept_level: [graduate, entry, associate, junior, intern, trainee]
+  # Matched word by word against the title. "Distinguished", "Fellow" and "Expert"
+  # are here because a first run let "Distinguished Engineer" through as workable.
+  reject_level: [senior, snr, sr, staff, principal, distinguished, fellow, expert,
+                 lead, director, head, chief, vp, president, manager, iii, iv]
+
+locations:
+  # A posting usually lists several locations, written half a dozen ways:
+  # "Remote, Canada; Remote, United Kingdom", "United States (Remote)",
+  # "GB-London", "2 Locations". Each is judged and the BEST verdict wins, because
+  # one workable office makes the posting workable.
+  #
+  # Matching is case-insensitive substring, so "Ireland" catches "Dublin, Ireland"
+  # and "Remote - Ireland".
+
+  preferred: [Dublin, Ireland]
+
+  acceptable:
+    - Remote EU
+    - Netherlands
+    - Amsterdam
+    - Germany
+    - Berlin
+    - Munich
+    - France
+    - Paris
+    - Spain
+    - Barcelona
+    - Madrid
+    - Portugal
+    - Lisbon
+    - Luxembourg
+    - Belgium
+    - Brussels
+    - Italy
+    - Milan
+    - Rome
+    - Austria
+    - Vienna
+    - Poland
+    - Warsaw
+    - Krakow
+    - Sweden
+    - Stockholm
+    - Denmark
+    - Copenhagen
+    - Estonia
+    - Tallinn
+    - Lithuania
+    - Vilnius
+    - Finland
+    - Helsinki
+    - Czech
+    - Prague
+    - Romania
+    - Bucharest
+
+  # Workable only if the employer covers sponsorship. Flagged, not excluded.
+  conditional:
+    - United Kingdom
+    - London
+    - Manchester
+    - Edinburgh
+    - Switzerland
+    - Zurich
+    - Norway
+    - Oslo
+
+  # Not workable. Still counted and still one click away.
+  excluded:
+    - United States
+    - Canada
+    - Mexico
+    - Brazil
+    - Argentina
+    - India
+    - Bangalore
+    - Hyderabad
+    - Pune
+    - Singapore
+    - Japan
+    - Tokyo
+    - China
+    - Shanghai
+    - Beijing
+    - Hong Kong
+    - Australia
+    - Sydney
+    - Melbourne
+    - New Zealand
+    - Israel
+    - Tel Aviv
+    - South Africa
+    - Nigeria
+    - Kenya
+    - Egypt
+    - Turkey
+    - Philippines
+    - Manila
+    - Indonesia
+    - Jakarta
+    - Vietnam
+    - Thailand
+    - Korea
+    - Taiwan
+    - Costa Rica
+    - Colombia
+    - Chile
+    - Peru
+
+  # "Remote" with no country attached: treat as workable, and say so rather than
+  # guessing a country.
+  remote_counts_as_acceptable: true
+
+tracks:
+  # Require a positive match from the `cluster` rules in rules.yaml. Without this,
+  # every recruiter, designer and finance role on a 400-posting board counts as
+  # workable, because none of them trips a gate.
+  #
+  # It is the most effective single setting here and the most likely to be wrong:
+  # it fails whenever your cluster rules are too narrow. Survivable only because an
+  # excluded posting is still counted and one click away - check the excluded list
+  # for a week before trusting it.
+  require_match: true
+
+# Which labels make a posting UNWORKABLE. Anything not listed here stays a warning
+# you can see and overrule - the decision stays yours.
+#
+# Ids come from rules.yaml, plus the structured ones this file produces:
+#   location-excluded, location-conditional, level-too-senior
+exclude_if:
+  - no-target-track
+  - location-excluded
+  - level-too-senior
+  - language-gate
+  - visa-not-sponsored
+  - enrolment-required
+  - out-of-track-sales
+
+# Not listed above, and therefore only warnings:
+#   seniority-threshold  - "5+ years" is often aspirational; worth seeing
+#   coding-test-gate     - a preference, not an eligibility rule
+#   location-conditional - a UK role may well cover sponsorship; worth seeing
+#   location-unknown     - never excluded; an unclear location is shown, not guessed
+#   talent-pipeline      - worth submitting to, just not an opening

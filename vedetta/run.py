@@ -185,8 +185,19 @@ def record_sighting(conn, run_id, source, posting_id, item):
 
 
 def label_posting(conn, engine: RuleEngine, posting_id: int, text: str,
-                  title: str | None = None) -> list:
+                  title: str | None = None, profile=None,
+                  location: str | None = None) -> list:
+    """Regex rules plus the profile's structured labels.
+
+    Two independent labellers over the same posting, each carrying its own
+    `produced_by`. Neither overrules the other: they accumulate as evidence.
+    """
     labels = engine.apply(text, title=title)
+    if profile is not None and profile.configured:
+        labels = labels + profile.labels_for(title, location)
+        track = profile.track_label(labels)
+        if track is not None:
+            labels = labels + [track]
     stamp = now_iso()
     for label in labels:
         conn.execute(
@@ -198,6 +209,16 @@ def label_posting(conn, engine: RuleEngine, posting_id: int, text: str,
         )
     if any(l.kind == "pipeline" for l in labels):
         conn.execute("UPDATE posting SET is_pipeline=1 WHERE id=?", (posting_id,))
+
+    # Workability is recorded, not enforced. The posting stays in the database and
+    # in the UI; it is folded out of the default view behind a visible count.
+    if profile is not None and profile.configured:
+        blocking = profile.blocked_by(labels)
+        conn.execute(
+            "UPDATE posting SET workable=?, blocked_by=? WHERE id=?",
+            (0 if blocking else 1,
+             "; ".join(l.explain for l in blocking) or None,
+             posting_id))
     return labels
 
 
@@ -253,10 +274,12 @@ def execute(conn, config, trigger: str = "manual", force_seed: bool = False) -> 
 
     run_id = start_run(conn, trigger, seeding)
     engine = RuleEngine(config.rules)
+    profile = config.profile
 
     report = {
         "run_id": run_id, "seeding": seeding, "polls": [], "new": [],
-        "seeded": [], "closed": 0, "sources": len(sources),
+        "seeded": [], "excluded": [], "excluded_reasons": {},
+        "closed": 0, "sources": len(sources),
         "unwatched": unwatched(conn),
     }
 
@@ -272,10 +295,13 @@ def execute(conn, config, trigger: str = "manual", force_seed: bool = False) -> 
             record_sighting(conn, run_id, source, posting_id, item)
             if is_new:
                 labels = label_posting(conn, engine, posting_id,
-                                       item.text or item.title, title=item.title)
+                                       item.text or item.title, title=item.title,
+                                       profile=profile, location=item.location)
                 # A posting from a source being seeded is recorded and labelled, but
                 # kept out of the digest: it is history, not news.
                 bucket = "seeded" if source["id"] in seeding_sources else "new"
+                blocking = (profile.blocked_by(labels)
+                            if profile is not None and profile.configured else [])
                 report[bucket].append({
                     "posting_id": posting_id,
                     "employer": source["employer_name"],
@@ -287,11 +313,21 @@ def execute(conn, config, trigger: str = "manual", force_seed: bool = False) -> 
                     "labels": [l.__dict__ for l in labels],
                     "score": score(labels, (config.settings.get("ranking") or {}).get("weights")),
                     "platform": source["platform"],
+                    "workable": not blocking,
+                    "blocked_by": [l.explain for l in blocking],
                 })
         conn.commit()
 
     report["closed"] = close_missing(conn, run_id)
     report["new"].sort(key=lambda p: (-p["score"], p["employer"], p["title"]))
+    # Split for the digest. Both halves are reported; only the prominence differs.
+    report["excluded"] = [p for p in report["new"] if not p.get("workable", True)]
+    report["new"] = [p for p in report["new"] if p.get("workable", True)]
+    reasons: dict[str, int] = {}
+    for posting in report["excluded"]:
+        for reason in posting["blocked_by"]:
+            reasons[reason] = reasons.get(reason, 0) + 1
+    report["excluded_reasons"] = dict(sorted(reasons.items(), key=lambda kv: -kv[1]))
 
     conn.execute("UPDATE run SET finished_at=? WHERE id=?", (now_iso(), run_id))
     conn.commit()
@@ -301,3 +337,44 @@ def execute(conn, config, trigger: str = "manual", force_seed: bool = False) -> 
 def mark_digest_sent(conn, run_id: int) -> None:
     conn.execute("UPDATE run SET digest_sent=1 WHERE id=?", (run_id,))
     conn.commit()
+
+
+def relabel(conn, config) -> dict:
+    """Re-evaluate every stored posting against the current rules and profile.
+
+    Needed because the labels are a cached judgement. Edit rules.yaml or profile.yaml
+    and the postings already in the database still carry the old verdicts - which
+    would mean the thing you just changed appears not to work, and a posting you just
+    un-excluded stays hidden. That is the silent-failure shape again, so it gets a
+    command rather than a note in the documentation.
+
+    Triage decisions are never touched.
+    """
+    engine = RuleEngine(config.rules)
+    profile = config.profile
+    rows = conn.execute(
+        "SELECT id, title, location, raw FROM posting ORDER BY id").fetchall()
+
+    stats = {"postings": 0, "workable": 0, "excluded": 0}
+    for row in rows:
+        text = row["title"] or ""
+        if row["raw"]:
+            try:
+                payload = json.loads(row["raw"])
+                content = payload.get("content") or payload.get("description") or ""
+                if content:
+                    from .adapters.greenhouse import _unescape
+                    parts = [row["title"], row["location"], _unescape(content)]
+                    text = "\n".join(p for p in parts if p)
+            except Exception:
+                pass
+        conn.execute("DELETE FROM label WHERE posting_id=?", (row["id"],))
+        labels = label_posting(conn, engine, row["id"], text, title=row["title"],
+                               profile=profile, location=row["location"])
+        stats["postings"] += 1
+        if profile.configured and profile.blocked_by(labels):
+            stats["excluded"] += 1
+        else:
+            stats["workable"] += 1
+    conn.commit()
+    return stats

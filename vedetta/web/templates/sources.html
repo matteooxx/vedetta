@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% set active = 'sources' %}
+{% block title %}Sources · Vedetta{% endblock %}
 {% block body %}
 <h1>Sources</h1>
 <p class="lede">An employer can have several routes. Where two exist, both are polled:
@@ -16,8 +17,11 @@ you real titles, and you decide.
 </div>
 
 <table>
-  <tr><th>Employer</th><th>Platform</th><th>Identifier</th><th>Confirmed</th>
-      <th>Health</th><th></th></tr>
+  <caption>Unconfirmed sources are listed first: they are never polled until you
+  confirm them.</caption>
+  <thead><tr><th>Employer</th><th>Platform</th><th>Identifier</th><th>Confirmed</th>
+      <th>Health</th><th><span style="position:absolute;left:-9999px">Actions</span></th></tr></thead>
+  <tbody>
   {% for s in sources %}
   <tr>
     <td>{{ s.employer }}</td>
@@ -39,6 +43,7 @@ you real titles, and you decide.
     </td>
   </tr>
   {% endfor %}
+  </tbody>
 </table>
 
 <p class="small muted">Confirming a source means adding <code>verified_on</code> to it in

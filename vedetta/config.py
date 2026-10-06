@@ -41,6 +41,7 @@ class Config:
     settings: dict = field(default_factory=dict)
     watchlist: dict = field(default_factory=dict)
     rules: dict = field(default_factory=dict)
+    profile_doc: dict = field(default_factory=dict)
     sources_used: dict = field(default_factory=dict)
 
     @property
@@ -48,6 +49,11 @@ class Config:
         value = self.settings.get("database", "runtime/vedetta.db")
         path = Path(value)
         return path if path.is_absolute() else self.root / path
+
+    @property
+    def profile(self):
+        from .profile import Profile
+        return Profile.from_dict(self.profile_doc)
 
     @property
     def digest(self) -> dict:
@@ -81,12 +87,14 @@ class Config:
 def load(root: str | Path = ".", config_dir: str | None = None) -> Config:
     root = Path(root).resolve()
     cdir = Path(config_dir) if config_dir else root / DEFAULT_CONFIG_DIR
-    picks = {name: _pick(cdir, name) for name in ("settings", "watchlist", "rules")}
+    picks = {name: _pick(cdir, name)
+             for name in ("settings", "watchlist", "rules", "profile")}
     return Config(
         root=root,
         settings=_load(picks["settings"]),
         watchlist=_load(picks["watchlist"]),
         rules=_load(picks["rules"]),
+        profile_doc=_load(picks["profile"]),
         sources_used={k: v.name for k, v in picks.items()},
     )
 

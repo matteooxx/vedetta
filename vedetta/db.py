@@ -80,10 +80,16 @@ CREATE TABLE IF NOT EXISTS posting (
   closed_run     INTEGER REFERENCES run(id),
   is_pipeline    INTEGER,
   dup_of         INTEGER REFERENCES posting(id),
+  -- Workability per the reader's profile. 0 means folded out of the default view,
+  -- never deleted: the count is always shown and one click reveals them.
+  workable       INTEGER NOT NULL DEFAULT 1,
+  blocked_by     TEXT,
   raw            TEXT
 );
 CREATE INDEX IF NOT EXISTS posting_recon
   ON posting(employer_id, title_norm, location_norm);
+CREATE INDEX IF NOT EXISTS posting_workable
+  ON posting(workable, closed_run, id);
 
 CREATE TABLE IF NOT EXISTS sighting (
   id           INTEGER PRIMARY KEY,
@@ -136,11 +142,41 @@ CREATE TABLE IF NOT EXISTS tracker_match (
 """
 
 
+# Additive migrations only: {table: {column: definition}}. CREATE TABLE IF NOT EXISTS
+# does nothing to a table that already exists, so a new column needs this. Additive
+# is the only kind allowed here - a destructive migration on a database holding the
+# operator's triage decisions is not something a start-up path should be able to do.
+MIGRATIONS = {
+    "posting": {
+        "workable": "INTEGER NOT NULL DEFAULT 1",
+        "blocked_by": "TEXT",
+    },
+}
+
+
+def _migrate(conn: sqlite3.Connection) -> list[str]:
+    applied = []
+    for table, columns in MIGRATIONS.items():
+        existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if not existing:
+            continue
+        for column, definition in columns.items():
+            if column not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+                applied.append(f"{table}.{column}")
+    if applied:
+        conn.commit()
+    return applied
+
+
 def connect(path: str | Path) -> sqlite3.Connection:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path))
     conn.row_factory = sqlite3.Row
+    # Migrate before the schema script, because the script creates indexes that
+    # reference the new columns.
+    _migrate(conn)
     conn.executescript(SCHEMA)
     return conn
 

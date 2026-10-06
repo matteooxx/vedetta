@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% set active = 'sources' %}
+{% block title %}{{ source.employer }} · Vedetta{% endblock %}
 {% block body %}
 <h1>{{ source.employer }}</h1>
 <p class="lede"><code>{{ source.platform }}</code> &middot;
@@ -13,14 +14,16 @@ are indistinguishable from a quiet employer.
 </div>
 
 <table>
-  <tr><th>Title</th><th>Location</th><th>Published</th></tr>
+  <thead><tr><th>Title</th><th>Location</th><th>Published</th></tr></thead>
+  <tbody>
   {% for p in preview %}
   <tr>
     <td>{% if p.url %}<a href="{{ p.url }}">{{ p.title }}</a>{% else %}{{ p.title }}{% endif %}</td>
     <td class="small">{{ p.location or '' }}</td>
-    <td class="small muted mono">{{ p.published_at or '' }}</td>
+    <td class="small muted">{{ p.published_at | when }}</td>
   </tr>
   {% endfor %}
+  </tbody>
 </table>
 
 <div class="row">

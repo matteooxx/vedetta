@@ -1,60 +1,132 @@
 {% extends "base.html" %}
 {% set active = 'postings' %}
+{% block title %}Postings · Vedetta{% endblock %}
 {% block body %}
 <h1>Postings</h1>
-<p class="lede">Everything the watch has seen. Labels explain the ranking in the digest;
-nothing here was filtered out, and nothing ever is.</p>
+<p class="lede">Everything the watch has seen. Labels explain the ranking; the reason
+for every exclusion is shown, and nothing is ever deleted.</p>
 
-<form class="row" method="get">
-  <input type="search" name="q" value="{{ q }}" placeholder="title, employer, location"
-         style="padding:6px 9px;border:1px solid var(--rule);border-radius:4px;
-                background:var(--paper);color:var(--ink);min-width:240px">
-  <select name="state" style="padding:6px;border:1px solid var(--rule);border-radius:4px;
-                             background:var(--paper);color:var(--ink)">
-    <option value="open"   {{ 'selected' if state=='open' }}>open</option>
-    <option value="closed" {{ 'selected' if state=='closed' }}>closed</option>
-    <option value="all"    {{ 'selected' if state=='all' }}>all</option>
-  </select>
-  <button class="ghost" type="submit">Filter</button>
-  <span class="muted small">{{ postings|length }} shown (most recent first, capped at 400)</span>
+<form class="toolbar" method="get" role="search">
+  <div class="field">
+    <label for="q">Search</label>
+    <input type="search" id="q" name="q" value="{{ q }}" autocomplete="off"
+           spellcheck="false" placeholder="Title, employer or location…">
+  </div>
+  <div class="field">
+    <label for="state">Status</label>
+    <select id="state" name="state">
+      <option value="open"   {{ 'selected' if state=='open' }}>Open</option>
+      <option value="closed" {{ 'selected' if state=='closed' }}>Closed</option>
+      <option value="all"    {{ 'selected' if state=='all' }}>All</option>
+    </select>
+  </div>
+  <input type="hidden" name="scope" value="{{ scope }}">
+  <button type="submit">Search</button>
 </form>
 
-<table>
-  <tr><th>Employer</th><th>Posting</th><th>Labels</th><th>Triage</th></tr>
+{% if profile_on %}
+<div class="segmented" role="group" aria-label="Which postings to show">
+  <a href="{{ url_for('postings', scope='workable', state=state, q=q) }}"
+     class="{{ 'on' if scope=='workable' }}"
+     aria-current="{{ 'true' if scope=='workable' else 'false' }}">
+    Workable <span class="count">{{ counts.workable }}</span>
+  </a>
+  <a href="{{ url_for('postings', scope='excluded', state=state, q=q) }}"
+     class="{{ 'on' if scope=='excluded' }}"
+     aria-current="{{ 'true' if scope=='excluded' else 'false' }}">
+    Excluded by your profile <span class="count">{{ counts.excluded }}</span>
+  </a>
+  <a href="{{ url_for('postings', scope='all', state=state, q=q) }}"
+     class="{{ 'on' if scope=='all' }}"
+     aria-current="{{ 'true' if scope=='all' else 'false' }}">
+    Everything <span class="count">{{ counts.workable + counts.excluded }}</span>
+  </a>
+</div>
+
+{% if scope == 'workable' and counts.excluded %}
+<p class="small muted">
+  {{ counts.excluded }} postings are folded out of this view by
+  <a href="{{ url_for('config_edit', name='profile') }}">profile.yaml</a>, never deleted.
+  {% if reasons %}Mostly:
+    {% for r in reasons[:3] %}<strong>{{ r.n }}</strong> {{ r.reason|truncate(58) }}{{ '; ' if not loop.last }}{% endfor %}.
+  {% endif %}
+</p>
+{% elif scope == 'excluded' %}
+<div class="note">
+  <strong>These are the postings your profile says you could not take on.</strong>
+  They are kept and counted so you can check the filter rather than trust it. If any
+  of these should have reached you, that is a bug in
+  <a href="{{ url_for('config_edit', name='profile') }}">profile.yaml</a> or
+  <a href="{{ url_for('config_edit', name='rules') }}">rules.yaml</a> — worth a look
+  for the first week.
+</div>
+{% endif %}
+{% else %}
+<div class="note">
+  No profile is configured, so every posting is shown unranked for workability. Set one
+  in <a href="{{ url_for('config_edit', name='profile') }}">profile.yaml</a> to separate
+  what you could take on from what you could not.
+</div>
+{% endif %}
+
+{% if postings %}
+<p class="small muted">Showing {{ postings|length }}, newest first{% if postings|length >= 300 %} (capped at 300){% endif %}.</p>
+<ul class="cards">
   {% for p in postings %}
-  <tr>
-    <td>{{ p.employer }}<div class="small muted">{{ p.location or 'location not stated' }}</div></td>
-    <td>
-      {% if p.url %}<a href="{{ p.url }}">{{ p.title }}</a>{% else %}{{ p.title }}{% endif %}
-      {% if p.is_pipeline %}<span class="tag info">pipeline, not an opening</span>{% endif %}
-      {% if p.dup_of %}<span class="tag warning">possible duplicate of #{{ p.dup_of }}</span>{% endif %}
-      {% if p.closed_run %}<span class="tag warning">closed</span>{% endif %}
-      <div class="small muted">published {{ p.published_at or 'date not supplied' }}</div>
-    </td>
-    <td>
-      {% if p.labels %}
+  <li class="card{{ ' excluded' if not p.workable }}">
+    <div class="card-main">
+      <h2 class="card-title">
+        {% if p.url %}<a href="{{ p.url }}" rel="noopener">{{ p.title }}</a>
+        {% else %}{{ p.title }}{% endif %}
+      </h2>
+      <p class="card-meta">
+        <strong>{{ p.employer }}</strong>
+        <span aria-hidden="true">·</span> {{ p.location or 'Location not stated' }}
+        <span aria-hidden="true">·</span> {{ p.published_at | when }}
+      </p>
+      <p class="tags">
+        {% if p.is_pipeline %}<span class="tag info">Pipeline, not an opening</span>{% endif %}
+        {% if p.dup_of %}<span class="tag warning">Possible duplicate of #{{ p.dup_of }}</span>{% endif %}
+        {% if p.closed_run %}<span class="tag warning">Closed</span>{% endif %}
         {% for l in p.labels %}
           <span class="tag {{ l.severity }}" title="from {{ l.produced_by }}">{{ l.explain }}{% if l.value %} {{ l.value }}{% endif %}</span>
         {% endfor %}
-      {% else %}<span class="small muted">no labels matched &mdash; shown unranked rather than dropped</span>{% endif %}
-    </td>
-    <td class="small">
-      {% for s in ['interested','applied','dismissed'] %}
-      <form class="inline" method="post" action="{{ url_for('triage', posting_id=p.id) }}">
+        {% if not p.labels %}<span class="tag info">No labels matched — shown unranked rather than dropped</span>{% endif %}
+      </p>
+    </div>
+    <div class="card-actions">
+      {% for s, verb in [('interested','Interested'), ('applied','Applied'), ('dismissed','Dismissed')] %}
+      <form method="post" action="{{ url_for('triage', posting_id=p.id) }}">
         <input type="hidden" name="state" value="{{ s }}">
-        <button class="ghost" style="padding:2px 7px;font-size:.78rem"
-          {% if p.triage == s %}style="padding:2px 7px;font-size:.78rem;background:var(--accent);color:#fff"{% endif %}
-          type="submit">{{ s }}</button>
+        <button type="submit" class="chip{{ ' chosen' if p.triage == s }}"
+                aria-pressed="{{ 'true' if p.triage == s else 'false' }}">{{ verb }}</button>
       </form>
       {% endfor %}
       {% if p.triage %}
-      <form class="inline" method="post" action="{{ url_for('triage', posting_id=p.id) }}">
+      <form method="post" action="{{ url_for('triage', posting_id=p.id) }}">
         <input type="hidden" name="state" value="clear">
-        <button class="ghost" style="padding:2px 7px;font-size:.78rem" type="submit">clear</button>
+        <button type="submit" class="chip subtle">Clear</button>
       </form>
       {% endif %}
-    </td>
-  </tr>
+    </div>
+  </li>
   {% endfor %}
-</table>
+</ul>
+{% else %}
+<div class="empty">
+  {% if scope == 'workable' and counts.excluded %}
+    <p><strong>Nothing workable here.</strong></p>
+    <p class="small">{{ counts.excluded }} postings were excluded by your profile.
+      <a href="{{ url_for('postings', scope='excluded', state=state, q=q) }}">See them and why</a>
+      — if the filter is wrong, that is worth knowing now rather than in a month.</p>
+  {% elif q %}
+    <p><strong>Nothing matches “{{ q }}”.</strong></p>
+    <p class="small"><a href="{{ url_for('postings', scope=scope, state=state) }}">Clear the search</a></p>
+  {% else %}
+    <p><strong>No postings recorded yet.</strong></p>
+    <p class="small">Confirm a source on the <a href="{{ url_for('sources') }}">Sources</a>
+      page, then run the watch from the <a href="{{ url_for('dashboard') }}">Dashboard</a>.</p>
+  {% endif %}
+</div>
+{% endif %}
 {% endblock %}

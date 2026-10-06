@@ -81,6 +81,23 @@ def cmd_run(args) -> int:
     return 0
 
 
+def cmd_relabel(args) -> int:
+    """Re-apply the current rules and profile to postings already stored.
+
+    The labels are a cached judgement. Without this, editing rules.yaml or
+    profile.yaml appears not to work: the postings you were looking at keep their old
+    verdicts, and anything you just un-excluded stays hidden.
+    """
+    cfg = _load(args)
+    conn = db_mod.connect(cfg.db_path)
+    stats = run_mod.relabel(conn, cfg)
+    conn.close()
+    print(f"re-evaluated {stats['postings']} postings against the current configuration")
+    print(f"  workable : {stats['workable']}")
+    print(f"  excluded : {stats['excluded']} (folded out of the default view, not deleted)")
+    return 0
+
+
 def cmd_check(args) -> int:
     cfg = _load(args)
     status = db_mod.check(cfg.db_path)
@@ -102,6 +119,8 @@ def main(argv=None) -> int:
     run_parser.add_argument("--trigger", default="manual")
     run_parser.set_defaults(func=cmd_run)
 
+    sub.add_parser("relabel", help="re-apply rules and profile to stored postings"
+                   ).set_defaults(func=cmd_relabel)
     sub.add_parser("check").set_defaults(func=cmd_check)
 
     args = parser.parse_args(argv)

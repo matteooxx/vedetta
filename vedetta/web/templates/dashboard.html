@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% set active = 'dash' %}
+{% block title %}Dashboard · Vedetta{% endblock %}
 {% block body %}
 <h1>Dashboard</h1>
 <p class="lede">The watch itself is a scheduled job, not this page. This is where you
@@ -14,12 +15,15 @@ find out whether it ran and what it saw.</p>
 
 <h2>Last run</h2>
 {% if last %}
-<p class="small">Run <strong>{{ last.id }}</strong> &middot; started {{ last.started_at }}
-  &middot; {{ 'finished ' ~ last.finished_at if last.finished_at else 'did not finish' }}
+<p class="small muted">Run <strong>{{ last.id }}</strong>
+  &middot; {{ last.started_at | when }}
+  &middot; {{ 'finished' if last.finished_at else 'did not finish' }}
   &middot; trigger <code>{{ last.trigger }}</code>
   &middot; digest {{ 'sent' if last.digest_sent else 'not sent' }}</p>
 <table>
-  <tr><th>Employer</th><th>Platform</th><th>Outcome</th><th>Items</th><th>Detail</th></tr>
+  <caption>Every source polled in the last run, including the ones that failed.</caption>
+  <thead><tr><th>Employer</th><th>Platform</th><th>Outcome</th><th scope="col">Items</th><th>Detail</th></tr></thead>
+  <tbody>
   {% for p in polls %}
   <tr>
     <td>{{ p.employer }}</td>
@@ -29,9 +33,12 @@ find out whether it ran and what it saw.</p>
     <td class="small muted">{{ p.error or '' }}</td>
   </tr>
   {% endfor %}
+  </tbody>
 </table>
 {% else %}
-<p class="muted">No run recorded yet.</p>
+<div class="empty"><p><strong>No run recorded yet.</strong></p>
+<p class="small">Confirm a source on the <a href="{{ url_for('sources') }}">Sources</a>
+page, then run the watch below.</p></div>
 {% endif %}
 
 {% if unwatched %}
@@ -39,17 +46,37 @@ find out whether it ran and what it saw.</p>
 <p class="small">These employers have no confirmed route. They are listed so the gap is
 visible &mdash; leaving them out would look exactly like having nothing to report.</p>
 <table>
+  <thead><tr><th>Employer</th><th>Careers page</th></tr></thead>
+  <tbody>
   {% for u in unwatched %}
   <tr><td>{{ u.display_name }}</td>
-      <td class="small"><a href="{{ u.careers_url }}">{{ u.careers_url or '' }}</a></td></tr>
+      <td class="small"><a href="{{ u.careers_url }}" rel="noopener">{{ u.careers_url or '—' }}</a></td></tr>
   {% endfor %}
+  </tbody>
 </table>
 {% endif %}
 
 <h2>Run now</h2>
 <p class="small">Polls every confirmed source immediately, using the same code as the
 scheduled run. It does not send mail &mdash; the scheduled run does that.</p>
-<form method="post" action="{{ url_for('run_now') }}">
-  <button type="submit">Run now</button>
+<form method="post" action="{{ url_for('run_now') }}" id="run-form">
+  <button type="submit" id="run-button">Run Now</button>
 </form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Polling every source takes seconds, sometimes tens of them. Without feedback the
+// button looks broken and gets clicked again.
+(function () {
+  var form = document.getElementById('run-form');
+  var button = document.getElementById('run-button');
+  if (!form || !button) return;
+  form.addEventListener('submit', function () {
+    button.setAttribute('aria-busy', 'true');
+    button.disabled = true;
+    button.textContent = 'Polling every source…';
+  });
+})();
+</script>
 {% endblock %}

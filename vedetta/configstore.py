@@ -33,7 +33,7 @@ try:  # comment-preserving round trip, used only by the editor
 except Exception:  # pragma: no cover - the daily run never needs it
     _ruamel = None
 
-EDITABLE = ("settings", "watchlist", "rules")
+EDITABLE = ("profile", "watchlist", "rules", "settings")
 
 
 class ConfigError(ValueError):
@@ -102,7 +102,38 @@ def validate(name: str, text: str) -> dict:
         _validate_watchlist(doc)
     elif name == "settings":
         _validate_settings(doc)
+    elif name == "profile":
+        _validate_profile(doc)
     return doc
+
+
+def _validate_profile(doc: dict) -> None:
+    locations = doc.get("locations") or {}
+    if not isinstance(locations, dict):
+        raise ConfigError("'locations' must be a mapping")
+    for bucket in ("preferred", "acceptable", "conditional", "excluded"):
+        value = locations.get(bucket)
+        if value is not None and not isinstance(value, list):
+            raise ConfigError(f"'locations.{bucket}' must be a list")
+    experience = doc.get("experience") or {}
+    if not isinstance(experience, dict):
+        raise ConfigError("'experience' must be a mapping")
+    for key in ("years", "max_years_requested"):
+        if experience.get(key) is not None and not isinstance(experience[key], int):
+            raise ConfigError(f"'experience.{key}' must be a whole number")
+    exclude = doc.get("exclude_if")
+    if exclude is not None and not isinstance(exclude, list):
+        raise ConfigError("'exclude_if' must be a list of rule ids")
+    # An overlap between acceptable and excluded would be silently resolved by
+    # precedence, which is exactly the kind of quiet surprise this file exists to
+    # avoid. Say so instead.
+    acceptable = {str(x).lower() for x in locations.get("acceptable") or []}
+    excluded = {str(x).lower() for x in locations.get("excluded") or []}
+    clash = acceptable & excluded
+    if clash:
+        raise ConfigError(
+            "these locations are in both 'acceptable' and 'excluded': "
+            + ", ".join(sorted(clash)))
 
 
 def _validate_rules(doc: dict) -> None:

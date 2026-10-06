@@ -32,8 +32,11 @@ def _labels_line(labels: list[dict]) -> str:
 def subject(report: dict, prefix: str = "Vedetta") -> str:
     count = len(report["new"])
     seeded = len(report.get("seeded") or [])
+    excluded = len(report.get("excluded") or [])
     broken = sum(1 for p in report["polls"] if p["outcome"] == "error")
     bits = [f"{count} new" if count else "nothing new"]
+    if excluded:
+        bits.append(f"{excluded} excluded")
     if seeded:
         bits.append(f"{seeded} seeded")
     if broken:
@@ -62,10 +65,14 @@ def render_text(report: dict, config=None) -> str:
     strong = [p for p in new if p["score"] >= threshold]
     rest = [p for p in new if p["score"] < threshold]
 
-    lines.append(f"NEW POSTINGS ({len(new)})")
+    lines.append(f"NEW AND WORKABLE ({len(new)})")
     lines.append("-" * 62)
     if not new:
-        lines.append("None. Every watched source answered and had nothing new.")
+        if report.get("excluded"):
+            lines.append("None that your profile says you could take on. The ones that")
+            lines.append("were excluded are listed further down with the reason.")
+        else:
+            lines.append("None. Every watched source answered and had nothing new.")
     for group, heading in ((strong, None), (rest, "Lower ranked - shown, not hidden")):
         if heading and group:
             lines.append("")
@@ -82,6 +89,23 @@ def render_text(report: dict, config=None) -> str:
             if posting.get("url"):
                 lines.append(f"    {posting['url']}")
             lines.append("")
+
+    excluded = report.get("excluded") or []
+    if excluded:
+        lines.append(f"EXCLUDED BY YOUR PROFILE ({len(excluded)})")
+        lines.append("-" * 62)
+        for reason, count in (report.get("excluded_reasons") or {}).items():
+            lines.append(f"  {count:4d}  {reason}")
+        lines.append("")
+        lines.append("  Listed in full below, not dropped. If any of these should have")
+        lines.append("  reached you, the fix is one line in profile.yaml.")
+        lines.append("")
+        for posting in excluded[:40]:
+            where = posting.get("location") or "location not stated"
+            lines.append(f"  - {posting['employer']} - {posting['title']} | {where}")
+        if len(excluded) > 40:
+            lines.append(f"  ... and {len(excluded) - 40} more, all visible in the interface")
+        lines.append("")
 
     if report.get("closed"):
         lines.append(f"CLOSED SINCE LAST RUN: {report['closed']}")
@@ -109,6 +133,7 @@ def render_text(report: dict, config=None) -> str:
 
     lines.append("")
     lines.append("-" * 62)
-    lines.append("Ranking is a transparent sum over the labels above. Disagree with it")
-    lines.append("by editing the rule file; nothing was filtered out of this mail.")
+    lines.append("Ranking is a transparent sum over the labels above. Nothing was")
+    lines.append("dropped: anything your profile excluded is listed, with the reason.")
+    lines.append("Disagree by editing rules.yaml or profile.yaml.")
     return "\n".join(lines)
