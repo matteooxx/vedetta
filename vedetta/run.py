@@ -229,18 +229,34 @@ def close_missing(conn, run_id: int) -> int:
     return cur.rowcount
 
 
+def is_seeding_source(conn, source_id: int) -> bool:
+    """True when this source has never been polled successfully before.
+
+    Seeding is per SOURCE, not per run. The first version keyed it off whether a
+    digest had ever been sent, which meant a --stdout run never left seeding mode and,
+    worse, a persistent mail failure would have kept every future run silent.
+
+    Per-source is also the correct granularity for the actual requirement: adding one
+    employer to the watchlist must not produce an email with that employer's entire
+    back catalogue in it, while the employers already being watched carry on normally.
+    """
+    row = conn.execute(
+        "SELECT 1 FROM sighting WHERE source_id=? LIMIT 1", (source_id,)
+    ).fetchone()
+    return row is None
+
+
 def execute(conn, config, trigger: str = "manual", force_seed: bool = False) -> dict:
     sources = verified_sources(conn)
-    previous_runs = conn.execute(
-        "SELECT count(*) FROM run WHERE digest_sent=1").fetchone()[0]
-    seeding = force_seed or previous_runs == 0
+    seeding_sources = {s["id"] for s in sources if force_seed or is_seeding_source(conn, s["id"])}
+    seeding = bool(sources) and len(seeding_sources) == len(sources)
 
     run_id = start_run(conn, trigger, seeding)
     engine = RuleEngine(config.rules)
 
     report = {
         "run_id": run_id, "seeding": seeding, "polls": [], "new": [],
-        "closed": 0, "sources": len(sources),
+        "seeded": [], "closed": 0, "sources": len(sources),
         "unwatched": unwatched(conn),
     }
 
@@ -249,6 +265,7 @@ def execute(conn, config, trigger: str = "manual", force_seed: bool = False) -> 
         report["polls"].append({
             "employer": source["employer_name"], "platform": source["platform"],
             "outcome": outcome, "count": len(items),
+            "seeding": source["id"] in seeding_sources,
         })
         for item in items:
             posting_id, is_new = reconcile(conn, run_id, source, item)
@@ -256,7 +273,10 @@ def execute(conn, config, trigger: str = "manual", force_seed: bool = False) -> 
             if is_new:
                 labels = label_posting(conn, engine, posting_id,
                                        item.text or item.title, title=item.title)
-                report["new"].append({
+                # A posting from a source being seeded is recorded and labelled, but
+                # kept out of the digest: it is history, not news.
+                bucket = "seeded" if source["id"] in seeding_sources else "new"
+                report[bucket].append({
                     "posting_id": posting_id,
                     "employer": source["employer_name"],
                     "channel": source["channel"],

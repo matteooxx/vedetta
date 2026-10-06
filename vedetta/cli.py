@@ -46,13 +46,16 @@ def cmd_run(args) -> int:
     body = render.render_text(report, cfg)
     subject_line = render.subject(report, cfg.digest.get("subject_prefix", "Vedetta"))
 
-    if args.stdout or report["seeding"]:
+    # A run where every source was being seeded has no news in it, so there is
+    # nothing worth sending; any other run sends, including a quiet one, because a
+    # missing email has to keep meaning "something is wrong".
+    if args.stdout or (report["seeding"] and not report["new"]):
         print(subject_line)
         print()
         print(body)
         if report["seeding"] and not args.stdout:
             print()
-            print("(seeding run: nothing sent by design)")
+            print("(every source was seeded on this run: nothing sent by design)")
         conn.close()
         return 0
 

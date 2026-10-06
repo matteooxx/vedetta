@@ -31,8 +31,11 @@ def _labels_line(labels: list[dict]) -> str:
 
 def subject(report: dict, prefix: str = "Vedetta") -> str:
     count = len(report["new"])
+    seeded = len(report.get("seeded") or [])
     broken = sum(1 for p in report["polls"] if p["outcome"] == "error")
     bits = [f"{count} new" if count else "nothing new"]
+    if seeded:
+        bits.append(f"{seeded} seeded")
     if broken:
         bits.append(f"{broken} source{'s' if broken > 1 else ''} failing")
     return f"{prefix}: " + ", ".join(bits)
@@ -45,9 +48,13 @@ def render_text(report: dict, config=None) -> str:
     lines.append("=" * 62)
     lines.append("")
 
-    if report.get("seeding"):
-        lines.append("SEEDING RUN - the watchlist was recorded, no mail would normally")
-        lines.append("be sent for it. Notifications begin with the next run.")
+    seeded = report.get("seeded") or []
+    if seeded:
+        fresh = sorted({p["employer"] for p in seeded})
+        lines.append(f"SEEDED {len(seeded)} existing postings from {len(fresh)} newly")
+        lines.append(f"watched source(s): {', '.join(fresh)}.")
+        lines.append("They are recorded as history, not reported as news. Anything these")
+        lines.append("sources publish from now on appears below like everything else.")
         lines.append("")
 
     new = report["new"]
