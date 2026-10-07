@@ -100,20 +100,13 @@ for FILE in "$OUTBOX"/run-*.txt; do
   RUN_ID=$(basename "$FILE" .txt | sed 's/^run-//')
   RECIPIENT=$(sed -n 's/^VEDETTA_MAIL_TO=//p' "$ENVFILE" 2>/dev/null | head -1)
 
-  if python3 - "$FILE" "$RECIPIENT" <<'PY'
-import json, subprocess, sys
-path, recipient = sys.argv[1], (sys.argv[2] if len(sys.argv) > 2 else "").strip()
-text = open(path, encoding="utf-8").read()
-subject, _, body = text.partition("\n\n")
-payload = {"subject": subject.strip() or "Vedetta digest", "text": body}
-if recipient:
-    payload["to"] = [recipient]
-# Built in Python rather than quoted through the shell: the digest is multi-line and
-# quoting one of those into midclt is a documented way to lose an evening.
-subprocess.run(["midclt", "call", "mail.send", json.dumps(payload)], check=True,
-               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-PY
-  then
+  # Delivery goes through a script using the middleware client, not through midclt
+  # with a quoted argument. The first version did the latter and failed with
+  # "sudo: argv[3] mismatch" on a 15 KB payload - which is the handbook's own warning
+  # (api.md F-1, F-2) arriving on schedule. Its stderr is kept, not discarded: the
+  # first version hid the reason it failed, in a project whose whole point is that
+  # failures are visible.
+  if DELIVERY=$(python3 "$ROOT/deliver-digest.py" "$FILE" "$RECIPIENT" 2>&1); then
     # Recorded in the database by the application itself, so "was it sent?" has one
     # answer rather than two that can disagree.
     if vedetta outbox --sent "$RUN_ID" >/dev/null 2>&1; then
@@ -125,6 +118,7 @@ PY
     fi
   else
     log "digest for run $RUN_ID could not be sent; left queued for the next run"
+    log "  reason: $DELIVERY"
     FAILED=$((FAILED + 1))
   fi
 done
