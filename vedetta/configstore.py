@@ -221,6 +221,23 @@ def _validate_settings(doc: dict) -> None:
     digest = doc.get("digest")
     if digest is not None and not isinstance(digest, dict):
         raise ConfigError("'digest' must be a mapping")
+    views = doc.get("saved_views")
+    if views is not None:
+        if not isinstance(views, list):
+            raise ConfigError("'saved_views' must be a list")
+        names = set()
+        for index, view in enumerate(views, 1):
+            if not isinstance(view, dict):
+                raise ConfigError(f"saved view {index}: must be a mapping")
+            name = (view.get("name") or "").strip()
+            if not name:
+                raise ConfigError(f"saved view {index}: missing 'name'")
+            if name.lower() in names:
+                raise ConfigError(f"saved view '{name}': duplicate name")
+            names.add(name.lower())
+            if not isinstance(view.get("query") or "", str):
+                raise ConfigError(f"saved view '{name}': 'query' must be a string")
+
     weights = (doc.get("ranking") or {}).get("weights")
     if weights is not None:
         if not isinstance(weights, dict):

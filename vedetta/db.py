@@ -134,6 +134,19 @@ CREATE TABLE IF NOT EXISTS triage (
   decided_at TEXT NOT NULL
 );
 
+-- Every stage change, appended and never collapsed. Moving back a stage is
+-- information, and so is having cleared one: deleting either would quietly rewrite
+-- the record of a search.
+CREATE TABLE IF NOT EXISTS triage_event (
+  id         INTEGER PRIMARY KEY,
+  posting_id INTEGER NOT NULL REFERENCES posting(id) ON DELETE CASCADE,
+  state      TEXT NOT NULL,
+  note       TEXT,
+  at         TEXT NOT NULL,
+  source     TEXT NOT NULL DEFAULT 'human'
+);
+CREATE INDEX IF NOT EXISTS triage_event_posting ON triage_event(posting_id, id);
+
 CREATE TABLE IF NOT EXISTS tracker_entry (
   id            INTEGER PRIMARY KEY,
   source_file   TEXT NOT NULL,

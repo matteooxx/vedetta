@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+{% set active = 'insights' %}
+{% block title %}Signals · Vedetta{% endblock %}
+{% block body %}
+<h1>Signals</h1>
+<p class="lede">Things a list of postings cannot show. Every figure here is a query over
+what has already been collected — nothing is fetched, nothing is hidden, and no posting
+is re-scored.</p>
+
+<div class="segmented" role="group" aria-label="Window">
+  {% for w, label in [(4,'4 weeks'), (8,'8 weeks'), (13,'3 months'), (26,'6 months')] %}
+  <a href="{{ url_for('insights', weeks=w) }}" class="{{ 'on' if weeks==w }}"
+     aria-current="{{ 'true' if weeks==w else 'false' }}">{{ label }}</a>
+  {% endfor %}
+</div>
+
+<h2>Your pipeline</h2>
+<p class="small muted">Stages you set by hand. Nothing here is inferred — a stage moves
+because you said so.</p>
+{% if data.pipeline %}
+<div class="grid">
+  {% for s in data.pipeline %}
+  <a class="tile" style="text-decoration:none;color:inherit"
+     href="{{ url_for('postings', triage=[s.key], scope='all', state='all') }}">
+    <div class="n {{ s.tone if s.n else '' }}">{{ s.n }}</div>
+    <div class="k">{{ s.label }}</div>
+  </a>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if data.in_flight %}
+<h3 style="font-size:.95rem;margin:18px 0 8px">In flight ({{ data.in_flight|length }})</h3>
+<table>
+  <caption>Applied and not yet resolved — the question three flags could not answer.</caption>
+  <thead><tr><th>Employer</th><th>Posting</th><th>Stage</th><th>Since</th></tr></thead>
+  <tbody>
+  {% for f in data.in_flight %}
+  <tr>
+    <td>{{ f.employer }}</td>
+    <td>{% if f.url %}<a href="{{ f.url }}" rel="noopener">{{ f.title }}</a>
+        {% else %}{{ f.title }}{% endif %}
+      <div class="small muted">{{ f.location or 'Location not stated' }}</div></td>
+    <td class="small">{{ f.state | capitalize }}</td>
+    <td class="small muted">{{ f.decided_at | when }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+<h2>Who is hiring</h2>
+<p class="small muted">Counted from when the watch first saw a posting, not from the
+publication date the platform claims: several supply none, and the ones that do disagree
+about what it means. The run clock is ours and is consistent.</p>
+
+{% if data.activity %}
+<table>
+  <caption>Since {{ data.window.since }}. “Net” is postings that appeared minus
+    postings that closed.</caption>
+  <thead>
+    <tr><th>Employer</th><th>Open</th><th>Workable</th><th>Appeared</th>
+        <th>Closed</th><th>Net</th><th></th></tr>
+  </thead>
+  <tbody>
+  {% for a in data.activity %}
+  <tr>
+    <td>{{ a.display_name }}</td>
+    <td class="mono">{{ a.open_now }}</td>
+    <td class="mono">{{ a.open_workable }}</td>
+    <td class="mono">{{ a.appeared }}</td>
+    <td class="mono">{{ a.closed }}</td>
+    <td class="mono {{ 'positive' if a.net > 0 else ('warning' if a.net < 0 else 'muted') }}">
+      {{ '%+d' % a.net }}</td>
+    <td class="small">
+      <a href="{{ url_for('postings', employer=[a.key], scope='workable') }}">workable</a>
+      ·
+      <a href="{{ url_for('postings', employer=[a.key], scope='all') }}">all</a>
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="empty"><p><strong>Nothing recorded yet.</strong></p>
+  <p class="small">The figures here need at least one completed run.</p></div>
+{% endif %}
+
+{% if data.quiet %}
+<h2>Quiet since {{ data.window.since }}</h2>
+<p class="small muted">These employers still have openings but have published nothing
+new in the window. Not a verdict — a board can be quiet because it is fully staffed, or
+because nobody has updated it.</p>
+<p>{% for q in data.quiet %}<a class="tag info"
+  href="{{ url_for('postings', employer=[q.key], scope='all') }}">{{ q.display_name }}
+  ({{ q.open_now }})</a>{% endfor %}</p>
+{% endif %}
+
+<h2>Reposts</h2>
+<p class="small muted">A role that closed and came back under a new identifier. The most
+pointed case is one you were turned down for: the same job, open again.</p>
+
+{% if data.reposts %}
+<ul class="cards">
+  {% for r in data.reposts %}
+  <li class="card">
+    <div class="card-main">
+      <h3 class="card-title">
+        {% if r.url %}<a href="{{ r.url }}" rel="noopener">{{ r.title }}</a>
+        {% else %}{{ r.title }}{% endif %}
+      </h3>
+      <p class="card-meta"><strong>{{ r.employer }}</strong>
+        <span aria-hidden="true">·</span> {{ r.location or 'Location not stated' }}
+        <span aria-hidden="true">·</span> closed {{ r.closed_at | when }},
+        back {{ r.reappeared_at | when }}</p>
+      <p class="tags">
+        {% if r.previous_triage %}
+          <span class="tag {{ 'blocking' if r.previous_triage == 'dismissed' else 'warning' }}">
+            you marked the previous one “{{ r.previous_triage }}”</span>
+        {% else %}
+          <span class="tag info">previous one never triaged</span>
+        {% endif %}
+        <span class="tag info">was posting #{{ r.previous_id }}</span>
+      </p>
+    </div>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<div class="empty"><p><strong>No reposts seen.</strong></p>
+  <p class="small">A repost needs a posting to have closed and an equivalent one to
+    appear afterwards, so this stays empty until the watch has been running a while.</p>
+</div>
+{% endif %}
+
+<h2>Open a long time</h2>
+<p class="small muted">Open for more than {{ data.stale_days }} days. Often a pipeline
+rather than a vacancy — but it can also be a hard role, or an employer that forgets to
+close things. You can tell those apart; the program cannot, so it only points.</p>
+
+{% if data.stale %}
+<table>
+  <thead><tr><th>Employer</th><th>Posting</th><th>Days open</th><th>Note</th></tr></thead>
+  <tbody>
+  {% for s in data.stale %}
+  <tr>
+    <td>{{ s.employer }}</td>
+    <td>{% if s.url %}<a href="{{ s.url }}" rel="noopener">{{ s.title }}</a>
+        {% else %}{{ s.title }}{% endif %}
+      <div class="small muted">{{ s.location or 'Location not stated' }}</div></td>
+    <td class="mono">{{ s.days_open if s.days_open is not none else '—' }}</td>
+    <td class="small">
+      {% if s.is_pipeline %}<span class="tag info">says it is a pipeline</span>{% endif %}
+      {% if not s.workable %}<span class="tag warning">excluded by your profile</span>{% endif %}
+      {% if s.triage %}<span class="tag positive">{{ s.triage | capitalize }}</span>{% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="empty"><p><strong>Nothing open longer than {{ data.stale_days }} days.</strong></p>
+  <p class="small">Which also means the watch has not been running that long yet.</p></div>
+{% endif %}
+{% endblock %}

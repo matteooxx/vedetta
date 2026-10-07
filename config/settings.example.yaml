@@ -43,6 +43,15 @@ ai_worker:
   # a run.
   url: null
 
+saved_views:
+  # Named filter combinations. The postings page writes here when you save a view,
+  # and you can equally edit them by hand - same file, same source of truth.
+  # `query` is exactly what appears after the '?' on the postings page.
+  - name: Workable in Ireland
+    query: scope=workable&place=Ireland
+  - name: Remote, last week
+    query: scope=workable&mode=remote&age=7d
+
 trackers:
   # Optional: existing application records, read one-way. Never written to.
   - path: null

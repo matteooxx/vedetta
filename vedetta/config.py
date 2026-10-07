@@ -56,6 +56,11 @@ class Config:
         return Profile.from_dict(self.profile_doc)
 
     @property
+    def saved_views(self) -> list[dict]:
+        views = self.settings.get("saved_views") or []
+        return [v for v in views if isinstance(v, dict) and (v.get("name") or "").strip()]
+
+    @property
     def digest(self) -> dict:
         return self.settings.get("digest") or {}
 

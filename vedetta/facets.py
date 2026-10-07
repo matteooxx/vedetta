@@ -21,8 +21,15 @@ AGE_DAYS = {"24h": 1, "3d": 3, "7d": 7, "30d": 30}
 AGE_LABELS = {"24h": "Last 24 hours", "3d": "Last 3 days",
               "7d": "Last 7 days", "30d": "Last 30 days"}
 MODE_LABELS = {"remote": "Remote", "hybrid": "Hybrid", "onsite": "On site"}
-TRIAGE_LABELS = {"interested": "Interested", "applied": "Applied",
-                 "dismissed": "Dismissed", "none": "Not triaged"}
+def _triage_labels() -> dict:
+    """Labels come from the stage ladder, so the facet cannot drift from it."""
+    from .triage import STAGES
+    labels = {s.key: s.label for s in STAGES}
+    labels["none"] = "Not triaged"
+    return labels
+
+
+TRIAGE_LABELS = _triage_labels()
 
 
 @dataclass

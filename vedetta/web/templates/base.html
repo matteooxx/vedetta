@@ -109,6 +109,17 @@ input[type=search]{min-width:min(260px,100%)}
 .segmented a.on{background:var(--accent);color:var(--accent-ink);font-weight:600}
 .segmented .count{font-family:var(--mono);opacity:.85;margin-left:5px}
 
+.visually-hidden{position:absolute;width:1px;height:1px;margin:-1px;padding:0;
+  overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.stage-pick select{font:inherit;font-size:.8rem;padding:3px 7px;border-radius:999px;
+  border:1px solid var(--rule);background:var(--paper);color:var(--ink-soft)}
+.stage-pick select:hover{color:var(--ink);background:var(--accent-soft)}
+
+.views{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:0 0 12px}
+.views-label{font-size:.75rem;text-transform:uppercase;letter-spacing:.06em;
+  color:var(--ink-soft);font-weight:600;margin-right:3px}
+.views a.tag{text-decoration:none}
+
 .cards{list-style:none;margin:14px 0 0;padding:0;
   content-visibility:auto;contain-intrinsic-size:auto 130px}
 .card{display:flex;gap:14px;justify-content:space-between;flex-wrap:wrap;
@@ -205,6 +216,8 @@ a.tag:hover{background:var(--accent-soft)}
        aria-current="{{ 'page' if active=='dash' }}">Dashboard</a>
     <a href="{{ url_for('postings') }}" class="{{ 'on' if active=='postings' }}"
        aria-current="{{ 'page' if active=='postings' }}">Postings</a>
+    <a href="{{ url_for('insights') }}" class="{{ 'on' if active=='insights' }}"
+       aria-current="{{ 'page' if active=='insights' }}">Signals</a>
     <a href="{{ url_for('sources') }}" class="{{ 'on' if active=='sources' }}"
        aria-current="{{ 'page' if active=='sources' }}">Sources</a>
     <a href="{{ url_for('config_edit', name='profile') }}" class="{{ 'on' if active=='config' }}"

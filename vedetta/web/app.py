@@ -20,6 +20,8 @@ from flask import (Flask, abort, flash, redirect, render_template, request,
 from .. import config as config_mod
 from .. import configstore
 from .. import facets
+from .. import insights as insights_mod
+from .. import triage as triage_mod
 from .. import db as db_mod
 from .. import run as run_mod
 from ..runlock import RunInProgress, acquire
@@ -142,25 +144,24 @@ def create_app() -> Flask:
         }
         conn.close()
         return render_template("postings.html", postings=rows, sel=selection,
-                               view=view, profile_on=cfg.profile.configured)
+                               view=view, profile_on=cfg.profile.configured,
+                               saved_views=cfg.saved_views,
+                               stages=triage_mod.STAGES, quick=triage_mod.QUICK,
+                               current_query=request.query_string.decode("utf-8"))
 
     @app.post("/postings/<int:posting_id>/triage")
     def triage(posting_id: int):
         cfg = load_config()
         conn = open_db(cfg)
         state = request.form.get("state")
-        if state not in ("interested", "dismissed", "applied", "clear"):
-            abort(400)
+        note = (request.form.get("note") or "").strip() or None
         if state == "clear":
-            conn.execute("DELETE FROM triage WHERE posting_id=?", (posting_id,))
+            triage_mod.clear(conn, posting_id)
+        elif triage_mod.is_valid(state):
+            triage_mod.set_stage(conn, posting_id, state, note)
         else:
-            from ..labels.engine import now_iso
-            conn.execute(
-                """INSERT INTO triage (posting_id, state, decided_at) VALUES (?,?,?)
-                   ON CONFLICT(posting_id) DO UPDATE SET
-                     state=excluded.state, decided_at=excluded.decided_at""",
-                (posting_id, state, now_iso()))
-        conn.commit()
+            conn.close()
+            abort(400)
         conn.close()
         return redirect(request.referrer or url_for("postings"))
 
@@ -291,6 +292,73 @@ def create_app() -> Flask:
         flash(f"Re-evaluated {stats['postings']} postings: {stats['workable']} workable, "
               f"{stats['excluded']} excluded and still listed.", "ok")
         return redirect(request.referrer or url_for("postings"))
+
+    @app.post("/views")
+    def save_view():
+        """Append a named view to settings.yaml.
+
+        Written into the same file a person edits, through the same validate-and-back-up
+        path as the editor: saved views are configuration, not a second store
+        (ADR-0016). A structured write keeps the file's comments, which is the only
+        reason editing it by hand stays pleasant.
+        """
+        name = (request.form.get("name") or "").strip()
+        query = (request.form.get("query") or "").strip()
+        if not name:
+            flash("A view needs a name.", "error")
+            return redirect(request.referrer or url_for("postings"))
+
+        def mutate(doc):
+            views = doc.setdefault("saved_views", [])
+            for existing in views:
+                if str(existing.get("name", "")).strip().lower() == name.lower():
+                    existing["query"] = query
+                    return
+            views.append({"name": name, "query": query})
+
+        try:
+            configstore.patch(CONFIG_DIR, "settings", mutate, None)
+        except (configstore.ConfigError, configstore.ConflictError) as exc:
+            flash(f"Not saved: {exc}", "error")
+            return redirect(request.referrer or url_for("postings"))
+        flash(f"Saved the view “{name}”. It is in settings.yaml, so you can edit or "
+              f"reorder it there too.", "ok")
+        return redirect(url_for("postings", **request.args.to_dict(flat=False)))
+
+    @app.post("/views/delete")
+    def delete_view():
+        name = (request.form.get("name") or "").strip()
+
+        def mutate(doc):
+            views = doc.get("saved_views") or []
+            doc["saved_views"] = [
+                v for v in views
+                if str(v.get("name", "")).strip().lower() != name.lower()]
+
+        try:
+            configstore.patch(CONFIG_DIR, "settings", mutate, None)
+        except (configstore.ConfigError, configstore.ConflictError) as exc:
+            flash(f"Not removed: {exc}", "error")
+            return redirect(request.referrer or url_for("postings"))
+        flash(f"Removed the view “{name}”.", "ok")
+        return redirect(url_for("postings"))
+
+    @app.route("/insights")
+    def insights():
+        """Signals the posting list cannot show.
+
+        Everything here is a query over data already collected - no source is
+        contacted - and nothing here hides or re-scores a posting. It is context for
+        a human, which is the posture of the whole project.
+        """
+        cfg = load_config()
+        conn = open_db(cfg)
+        weeks = max(1, min(int(request.args.get("weeks", 8) or 8), 52))
+        data = insights_mod.summary(conn, weeks=weeks)
+        data["pipeline"] = triage_mod.pipeline(conn)
+        data["in_flight"] = triage_mod.in_flight(conn)
+        conn.close()
+        return render_template("insights.html", data=data, weeks=weeks)
 
     @app.route("/health")
     def health():

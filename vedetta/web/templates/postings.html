@@ -43,6 +43,15 @@
 employers. Every count below is live, and each group counts its own options against
 all your other choices.</p>
 
+{% if saved_views %}
+<nav class="views" aria-label="Saved views">
+  <span class="views-label">Saved views</span>
+  {% for v in saved_views %}
+    <a class="tag info" href="{{ url_for('postings') }}?{{ v.query }}">{{ v.name }}</a>
+  {% endfor %}
+</nav>
+{% endif %}
+
 <div class="segmented" role="group" aria-label="Which postings to show">
   {% for key, label in [('workable','Workable'), ('excluded','Excluded by your profile'), ('all','Everything')] %}
   <a href="{{ url_for('postings', **sel.as_params(scope=key)) }}"
@@ -94,6 +103,40 @@ all your other choices.</p>
         {% endfor %}
       </ul>
     </details>
+
+    {% if sel.active_count or sel.scope != 'workable' %}
+    <form method="post" action="{{ url_for('save_view') }}" style="margin-top:16px">
+      <div class="field">
+        <label for="view-name">Save this view</label>
+        <input type="text" id="view-name" name="name" autocomplete="off"
+               placeholder="e.g. Workable in Ireland…" required>
+      </div>
+      <input type="hidden" name="query" value="{{ current_query }}">
+      <button type="submit" class="ghost" style="margin-top:7px">Save View</button>
+      <p class="small muted" style="margin:6px 0 0">Stored in
+        <a href="{{ url_for('config_edit', name='settings') }}">settings.yaml</a>, so you
+        can rename or reorder it there as well.</p>
+    </form>
+    {% endif %}
+
+    {% if saved_views %}
+    <details class="facet" style="margin-top:14px">
+      <summary>Manage saved views</summary>
+      <ul class="facet-list">
+        {% for v in saved_views %}
+        <li class="opt" style="justify-content:space-between">
+          <a class="opt-label" href="{{ url_for('postings') }}?{{ v.query }}"
+             style="text-decoration:none;color:inherit">{{ v.name }}</a>
+          <form method="post" action="{{ url_for('delete_view') }}" style="display:inline">
+            <input type="hidden" name="name" value="{{ v.name }}">
+            <button type="submit" class="chip subtle"
+                    style="padding:1px 8px;font-size:.74rem">Remove</button>
+          </form>
+        </li>
+        {% endfor %}
+      </ul>
+    </details>
+    {% endif %}
 
     <form method="post" action="{{ url_for('relabel_now') }}" style="margin-top:18px">
       <button type="submit" class="ghost" id="relabel-button">Re-apply Rules</button>
@@ -154,13 +197,26 @@ all your other choices.</p>
         </p>
       </div>
       <div class="card-actions">
-        {% for s, verb in [('interested','Interested'), ('applied','Applied'), ('dismissed','Dismissed')] %}
+        {% for s in quick %}
         <form method="post" action="{{ url_for('triage', posting_id=p.id) }}">
           <input type="hidden" name="state" value="{{ s }}">
           <button type="submit" class="chip{{ ' chosen' if p.triage == s }}"
-                  aria-pressed="{{ 'true' if p.triage == s else 'false' }}">{{ verb }}</button>
+                  aria-pressed="{{ 'true' if p.triage == s else 'false' }}">
+            {% for st in stages %}{{ st.label if st.key == s }}{% endfor %}</button>
         </form>
         {% endfor %}
+        {# The full ladder lives behind a select: the three above are the moves that
+           get used constantly, the rest exist so "what is in flight" has an answer. #}
+        <form method="post" action="{{ url_for('triage', posting_id=p.id) }}" class="stage-pick">
+          <label class="visually-hidden" for="stage-{{ p.id }}">Stage for {{ p.title }}</label>
+          <select id="stage-{{ p.id }}" name="state" onchange="this.form.submit()">
+            <option value="">Stage…</option>
+            {% for st in stages %}
+            <option value="{{ st.key }}" {{ 'selected' if p.triage == st.key }}>{{ st.label }}</option>
+            {% endfor %}
+          </select>
+          <noscript><button type="submit" class="chip">Set</button></noscript>
+        </form>
         {% if p.triage %}
         <form method="post" action="{{ url_for('triage', posting_id=p.id) }}">
           <input type="hidden" name="state" value="clear">
