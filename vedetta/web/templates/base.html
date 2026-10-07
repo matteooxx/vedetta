@@ -144,6 +144,47 @@ textarea{width:100%;min-height:60vh;font-family:var(--mono);font-size:13px;
 .split{display:grid;gap:14px;grid-template-columns:1fr 1fr}
 @media(max-width:760px){.split{grid-template-columns:1fr}}
 
+/* Two-column filter layout: panel beside results, stacked on a phone. */
+.layout{display:grid;gap:20px;grid-template-columns:260px minmax(0,1fr);
+  align-items:start}
+@media(max-width:860px){.layout{grid-template-columns:1fr}}
+.panel{border:1px solid var(--rule);border-radius:var(--radius);padding:14px;
+  background:var(--raised);position:sticky;top:12px}
+@media(max-width:860px){.panel{position:static}}
+.results{min-width:0}
+
+.facet{border-top:1px solid var(--rule);padding:9px 0 4px;margin-top:6px}
+.facet:first-of-type{border-top:0}
+.facet summary{cursor:pointer;font-weight:600;font-size:.88rem;
+  display:flex;align-items:center;gap:7px;list-style:none;
+  touch-action:manipulation}
+.facet summary::-webkit-details-marker{display:none}
+.facet summary::before{content:'B8';color:var(--ink-soft);font-size:.8em;
+  transition:transform .12s ease}
+.facet[open] summary::before{transform:rotate(90deg)}
+.facet summary:hover{color:var(--accent)}
+.facet-hint{margin:6px 0 2px;font-size:.78rem;color:var(--ink-soft)}
+.badge{background:var(--accent);color:var(--accent-ink);border-radius:999px;
+  font:600 .72rem/1.5 var(--mono);padding:0 6px;margin-left:auto}
+.facet-list{list-style:none;margin:5px 0 0;padding:0}
+.facet-list li{margin:0}
+.opt{display:flex;align-items:center;gap:7px;padding:4px 5px;border-radius:5px;
+  text-decoration:none;color:var(--ink);font-size:.86rem;min-width:0}
+.opt:hover{background:var(--accent-soft)}
+.opt.on{background:var(--accent-soft);font-weight:600}
+.opt .box{flex:0 0 15px;height:15px;border:1px solid var(--rule);border-radius:3px;
+  display:grid;place-items:center;font-size:.7rem;line-height:1;
+  background:var(--paper);color:var(--accent)}
+.opt.on .box{border-color:var(--accent)}
+.opt-label{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap}
+.opt-n{flex:0 0 auto;color:var(--ink-soft);font-family:var(--mono);font-size:.78rem}
+.facet-more{padding:4px 5px}
+.meta-link{color:inherit;text-decoration:none;border-bottom:1px dotted var(--rule)}
+.meta-link:hover{color:var(--accent);border-bottom-color:currentColor}
+a.tag{text-decoration:none}
+a.tag:hover{background:var(--accent-soft)}
+
 @media (prefers-reduced-motion: reduce){
   *{animation-duration:.01ms !important;animation-iteration-count:1 !important;
     transition-duration:.01ms !important}

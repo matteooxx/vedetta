@@ -1,132 +1,208 @@
 {% extends "base.html" %}
 {% set active = 'postings' %}
 {% block title %}Postings · Vedetta{% endblock %}
+
+{% macro facet(name, heading, opts, hint='', open=false, limit=12) %}
+  {% if opts %}
+  <details class="facet" {{ 'open' if open or sel[name] }}>
+    <summary>
+      {{ heading }}
+      {% if sel[name] %}<span class="badge">{{ sel[name]|length }}</span>{% endif %}
+    </summary>
+    {% if hint %}<p class="facet-hint">{{ hint }}</p>{% endif %}
+    <ul class="facet-list">
+      {% for o in opts[:limit] %}
+      <li>
+        <a href="{{ url_for('postings', **sel.toggled(name, o.value)) }}"
+           class="opt {{ 'on' if sel.is_on(name, o.value) }}"
+           aria-pressed="{{ 'true' if sel.is_on(name, o.value) else 'false' }}">
+          <span class="box" aria-hidden="true">{{ '✓' if sel.is_on(name, o.value) else '' }}</span>
+          <span class="opt-label">{{ o.label }}</span>
+          <span class="opt-n">{{ o.n }}</span>
+        </a>
+      </li>
+      {% endfor %}
+      {% if opts|length > limit %}
+      <li class="facet-more">
+        {% for o in opts[limit:] if sel.is_on(name, o.value) %}
+          <a href="{{ url_for('postings', **sel.toggled(name, o.value)) }}"
+             class="opt on"><span class="box" aria-hidden="true">✓</span>
+            <span class="opt-label">{{ o.label }}</span><span class="opt-n">{{ o.n }}</span></a>
+        {% endfor %}
+        <span class="small muted">{{ opts|length - limit }} more, narrowed by searching</span>
+      </li>
+      {% endif %}
+    </ul>
+  </details>
+  {% endif %}
+{% endmacro %}
+
 {% block body %}
 <h1>Postings</h1>
-<p class="lede">Everything the watch has seen. Labels explain the ranking; the reason
-for every exclusion is shown, and nothing is ever deleted.</p>
+<p class="lede">Pick as many values as you like in each group — two locations, four
+employers. Every count below is live, and each group counts its own options against
+all your other choices.</p>
 
-<form class="toolbar" method="get" role="search">
-  <div class="field">
-    <label for="q">Search</label>
-    <input type="search" id="q" name="q" value="{{ q }}" autocomplete="off"
-           spellcheck="false" placeholder="Title, employer or location…">
-  </div>
-  <div class="field">
-    <label for="state">Status</label>
-    <select id="state" name="state">
-      <option value="open"   {{ 'selected' if state=='open' }}>Open</option>
-      <option value="closed" {{ 'selected' if state=='closed' }}>Closed</option>
-      <option value="all"    {{ 'selected' if state=='all' }}>All</option>
-    </select>
-  </div>
-  <input type="hidden" name="scope" value="{{ scope }}">
-  <button type="submit">Search</button>
-</form>
-
-{% if profile_on %}
 <div class="segmented" role="group" aria-label="Which postings to show">
-  <a href="{{ url_for('postings', scope='workable', state=state, q=q) }}"
-     class="{{ 'on' if scope=='workable' }}"
-     aria-current="{{ 'true' if scope=='workable' else 'false' }}">
-    Workable <span class="count">{{ counts.workable }}</span>
+  {% for key, label in [('workable','Workable'), ('excluded','Excluded by your profile'), ('all','Everything')] %}
+  <a href="{{ url_for('postings', **sel.as_params(scope=key)) }}"
+     class="{{ 'on' if sel.scope==key }}"
+     aria-current="{{ 'true' if sel.scope==key else 'false' }}">
+    {{ label }} <span class="count">{{ view.scopes[key] }}</span>
   </a>
-  <a href="{{ url_for('postings', scope='excluded', state=state, q=q) }}"
-     class="{{ 'on' if scope=='excluded' }}"
-     aria-current="{{ 'true' if scope=='excluded' else 'false' }}">
-    Excluded by your profile <span class="count">{{ counts.excluded }}</span>
-  </a>
-  <a href="{{ url_for('postings', scope='all', state=state, q=q) }}"
-     class="{{ 'on' if scope=='all' }}"
-     aria-current="{{ 'true' if scope=='all' else 'false' }}">
-    Everything <span class="count">{{ counts.workable + counts.excluded }}</span>
-  </a>
-</div>
-
-{% if scope == 'workable' and counts.excluded %}
-<p class="small muted">
-  {{ counts.excluded }} postings are folded out of this view by
-  <a href="{{ url_for('config_edit', name='profile') }}">profile.yaml</a>, never deleted.
-  {% if reasons %}Mostly:
-    {% for r in reasons[:3] %}<strong>{{ r.n }}</strong> {{ r.reason|truncate(58) }}{{ '; ' if not loop.last }}{% endfor %}.
-  {% endif %}
-</p>
-{% elif scope == 'excluded' %}
-<div class="note">
-  <strong>These are the postings your profile says you could not take on.</strong>
-  They are kept and counted so you can check the filter rather than trust it. If any
-  of these should have reached you, that is a bug in
-  <a href="{{ url_for('config_edit', name='profile') }}">profile.yaml</a> or
-  <a href="{{ url_for('config_edit', name='rules') }}">rules.yaml</a> — worth a look
-  for the first week.
-</div>
-{% endif %}
-{% else %}
-<div class="note">
-  No profile is configured, so every posting is shown unranked for workability. Set one
-  in <a href="{{ url_for('config_edit', name='profile') }}">profile.yaml</a> to separate
-  what you could take on from what you could not.
-</div>
-{% endif %}
-
-{% if postings %}
-<p class="small muted">Showing {{ postings|length }}, newest first{% if postings|length >= 300 %} (capped at 300){% endif %}.</p>
-<ul class="cards">
-  {% for p in postings %}
-  <li class="card{{ ' excluded' if not p.workable }}">
-    <div class="card-main">
-      <h2 class="card-title">
-        {% if p.url %}<a href="{{ p.url }}" rel="noopener">{{ p.title }}</a>
-        {% else %}{{ p.title }}{% endif %}
-      </h2>
-      <p class="card-meta">
-        <strong>{{ p.employer }}</strong>
-        <span aria-hidden="true">·</span> {{ p.location or 'Location not stated' }}
-        <span aria-hidden="true">·</span> {{ p.published_at | when }}
-      </p>
-      <p class="tags">
-        {% if p.is_pipeline %}<span class="tag info">Pipeline, not an opening</span>{% endif %}
-        {% if p.dup_of %}<span class="tag warning">Possible duplicate of #{{ p.dup_of }}</span>{% endif %}
-        {% if p.closed_run %}<span class="tag warning">Closed</span>{% endif %}
-        {% for l in p.labels %}
-          <span class="tag {{ l.severity }}" title="from {{ l.produced_by }}">{{ l.explain }}{% if l.value %} {{ l.value }}{% endif %}</span>
-        {% endfor %}
-        {% if not p.labels %}<span class="tag info">No labels matched — shown unranked rather than dropped</span>{% endif %}
-      </p>
-    </div>
-    <div class="card-actions">
-      {% for s, verb in [('interested','Interested'), ('applied','Applied'), ('dismissed','Dismissed')] %}
-      <form method="post" action="{{ url_for('triage', posting_id=p.id) }}">
-        <input type="hidden" name="state" value="{{ s }}">
-        <button type="submit" class="chip{{ ' chosen' if p.triage == s }}"
-                aria-pressed="{{ 'true' if p.triage == s else 'false' }}">{{ verb }}</button>
-      </form>
-      {% endfor %}
-      {% if p.triage %}
-      <form method="post" action="{{ url_for('triage', posting_id=p.id) }}">
-        <input type="hidden" name="state" value="clear">
-        <button type="submit" class="chip subtle">Clear</button>
-      </form>
-      {% endif %}
-    </div>
-  </li>
   {% endfor %}
-</ul>
-{% else %}
-<div class="empty">
-  {% if scope == 'workable' and counts.excluded %}
-    <p><strong>Nothing workable here.</strong></p>
-    <p class="small">{{ counts.excluded }} postings were excluded by your profile.
-      <a href="{{ url_for('postings', scope='excluded', state=state, q=q) }}">See them and why</a>
-      — if the filter is wrong, that is worth knowing now rather than in a month.</p>
-  {% elif q %}
-    <p><strong>Nothing matches “{{ q }}”.</strong></p>
-    <p class="small"><a href="{{ url_for('postings', scope=scope, state=state) }}">Clear the search</a></p>
-  {% else %}
-    <p><strong>No postings recorded yet.</strong></p>
-    <p class="small">Confirm a source on the <a href="{{ url_for('sources') }}">Sources</a>
-      page, then run the watch from the <a href="{{ url_for('dashboard') }}">Dashboard</a>.</p>
-  {% endif %}
 </div>
-{% endif %}
+
+<div class="layout">
+  <aside class="panel" aria-label="Filters">
+    <form method="get" class="field">
+      <label for="q">Search</label>
+      <input type="search" id="q" name="q" value="{{ sel.q }}" autocomplete="off"
+             spellcheck="false" placeholder="Title, employer or location…">
+      <input type="hidden" name="scope" value="{{ sel.scope }}">
+      <input type="hidden" name="state" value="{{ sel.state }}">
+      {% for n in ['employer','place','label','triage','mode','age'] %}
+        {% for v in sel[n] %}<input type="hidden" name="{{ n }}" value="{{ v }}">{% endfor %}
+      {% endfor %}
+      <button type="submit" class="ghost" style="margin-top:8px">Search</button>
+    </form>
+
+    {% if sel.active_count %}
+    <p class="small" style="margin:14px 0 4px">
+      <strong>{{ sel.active_count }}</strong> filter{{ 's' if sel.active_count != 1 }} active ·
+      <a href="{{ url_for('postings', scope=sel.scope) }}">Clear all</a>
+    </p>
+    {% endif %}
+
+    {{ facet('place',    'Location', view.options.place, open=true, limit=14,
+             hint='A posting naming several places appears under each of them.') }}
+    {{ facet('employer', 'Employer', view.options.employer, limit=14) }}
+    {{ facet('mode',     'Working pattern', view.options.mode, open=true, limit=3) }}
+    {{ facet('age',      'Published', view.options.age, limit=4) }}
+    {{ facet('label',    'Labels', view.options.label, limit=16,
+             hint='Postings carrying this label, whatever it says about them.') }}
+    {{ facet('triage',   'Your triage', view.options.triage, limit=4) }}
+
+    <details class="facet">
+      <summary>Status</summary>
+      <ul class="facet-list">
+        {% for key, label in [('open','Open'), ('closed','Closed'), ('all','Open and closed')] %}
+        <li><a href="{{ url_for('postings', **sel.as_params(state=key)) }}"
+               class="opt {{ 'on' if sel.state==key }}">
+          <span class="box" aria-hidden="true">{{ '✓' if sel.state==key else '' }}</span>
+          <span class="opt-label">{{ label }}</span></a></li>
+        {% endfor %}
+      </ul>
+    </details>
+
+    <form method="post" action="{{ url_for('relabel_now') }}" style="margin-top:18px">
+      <button type="submit" class="ghost" id="relabel-button">Re-apply Rules</button>
+      <p class="small muted" style="margin:6px 0 0">Run this after editing
+        <a href="{{ url_for('config_edit', name='profile') }}">profile.yaml</a> or
+        <a href="{{ url_for('config_edit', name='rules') }}">rules.yaml</a>; otherwise
+        these postings keep their old verdicts.</p>
+    </form>
+  </aside>
+
+  <section class="results" aria-label="Results">
+  {% if not profile_on %}
+  <div class="note">No profile is configured, so nothing is judged workable or not. Set
+    one in <a href="{{ url_for('config_edit', name='profile') }}">profile.yaml</a>.</div>
+  {% elif sel.scope == 'workable' and view.scopes.excluded %}
+  <p class="small muted">{{ view.scopes.excluded }} postings matching these filters are
+    folded out by your profile, never deleted —
+    <a href="{{ url_for('postings', **sel.as_params(scope='excluded')) }}">see them and why</a>.</p>
+  {% elif sel.scope == 'excluded' %}
+  <div class="note"><strong>These are the postings your profile says you could not take
+    on.</strong> Kept and counted so you can check the filter rather than trust it. If
+    any of these should have reached you, that is worth fixing in
+    <a href="{{ url_for('config_edit', name='profile') }}">profile.yaml</a>.</div>
+  {% endif %}
+
+  {% if postings %}
+  <p class="small muted">Showing {{ postings|length }} of {{ view.total }}, newest first{% if postings|length < view.total %} (capped at 200){% endif %}.</p>
+  <ul class="cards">
+    {% for p in postings %}
+    <li class="card{{ ' excluded' if not p.workable }}">
+      <div class="card-main">
+        <h2 class="card-title">
+          {% if p.url %}<a href="{{ p.url }}" rel="noopener">{{ p.title }}</a>
+          {% else %}{{ p.title }}{% endif %}
+        </h2>
+        <p class="card-meta">
+          <a href="{{ url_for('postings', **sel.as_params(employer=[p.employer_key])) }}"
+             class="meta-link"><strong>{{ p.employer }}</strong></a>
+          <span aria-hidden="true">·</span>
+          {% if p.places %}
+            {% for place in p.places %}<a class="meta-link"
+              href="{{ url_for('postings', **sel.toggled('place', place)) }}">{{ place }}</a>{{ ', ' if not loop.last }}{% endfor %}
+          {% else %}{{ p.location or 'Location not stated' }}{% endif %}
+          {% if p.is_remote %}<span class="tag info">Remote</span>{% endif %}
+          {% if p.is_hybrid %}<span class="tag info">Hybrid</span>{% endif %}
+          <span aria-hidden="true">·</span> {{ p.published_at | when }}
+        </p>
+        <p class="tags">
+          {% if p.triage %}<span class="tag positive">{{ p.triage | capitalize }}</span>{% endif %}
+          {% if p.is_pipeline %}<span class="tag info">Pipeline, not an opening</span>{% endif %}
+          {% if p.dup_of %}<span class="tag warning">Possible duplicate of #{{ p.dup_of }}</span>{% endif %}
+          {% if p.closed_run %}<span class="tag warning">Closed</span>{% endif %}
+          {% for l in p.labels %}
+            <a class="tag {{ l.severity }}" title="from {{ l.produced_by }} · click to filter"
+               href="{{ url_for('postings', **sel.toggled('label', l.rule_id)) }}">{{ l.explain }}{% if l.value %} {{ l.value }}{% endif %}</a>
+          {% endfor %}
+          {% if not p.labels %}<span class="tag info">No labels matched — shown unranked rather than dropped</span>{% endif %}
+        </p>
+      </div>
+      <div class="card-actions">
+        {% for s, verb in [('interested','Interested'), ('applied','Applied'), ('dismissed','Dismissed')] %}
+        <form method="post" action="{{ url_for('triage', posting_id=p.id) }}">
+          <input type="hidden" name="state" value="{{ s }}">
+          <button type="submit" class="chip{{ ' chosen' if p.triage == s }}"
+                  aria-pressed="{{ 'true' if p.triage == s else 'false' }}">{{ verb }}</button>
+        </form>
+        {% endfor %}
+        {% if p.triage %}
+        <form method="post" action="{{ url_for('triage', posting_id=p.id) }}">
+          <input type="hidden" name="state" value="clear">
+          <button type="submit" class="chip subtle">Clear</button>
+        </form>
+        {% endif %}
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <div class="empty">
+    {% if sel.active_count %}
+      <p><strong>Nothing matches these {{ sel.active_count }} filters.</strong></p>
+      <p class="small">Every count in the panel is live, so a group showing
+        <code>0</code> has nothing left under your other choices.
+        <a href="{{ url_for('postings', scope=sel.scope) }}">Clear all filters</a></p>
+    {% elif sel.scope == 'workable' and view.scopes.excluded %}
+      <p><strong>Nothing workable here.</strong></p>
+      <p class="small">{{ view.scopes.excluded }} postings were excluded by your profile.
+        <a href="{{ url_for('postings', **sel.as_params(scope='excluded')) }}">See them and why</a>.</p>
+    {% else %}
+      <p><strong>No postings recorded yet.</strong></p>
+      <p class="small">Confirm a source on the <a href="{{ url_for('sources') }}">Sources</a>
+        page, then run the watch from the <a href="{{ url_for('dashboard') }}">Dashboard</a>.</p>
+    {% endif %}
+  </div>
+  {% endif %}
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  var button = document.getElementById('relabel-button');
+  if (!button) return;
+  button.form.addEventListener('submit', function () {
+    button.setAttribute('aria-busy', 'true');
+    button.disabled = true;
+    button.textContent = 'Re-applying…';
+  });
+})();
+</script>
 {% endblock %}

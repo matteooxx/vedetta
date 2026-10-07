@@ -14,6 +14,7 @@ import json
 import time
 from datetime import datetime, timezone
 
+from . import places as places_mod
 from .adapters.base import AdapterError, normalise
 from .adapters.greenhouse import GreenhouseAdapter
 from .labels.engine import RuleEngine, now_iso, score
@@ -209,6 +210,15 @@ def label_posting(conn, engine: RuleEngine, posting_id: int, text: str,
         )
     if any(l.kind == "pipeline" for l in labels):
         conn.execute("UPDATE posting SET is_pipeline=1 WHERE id=?", (posting_id,))
+
+    # Normalised places, so the location can be filtered on rather than only read.
+    found, is_remote, is_hybrid = places_mod.extract(location)
+    conn.execute("DELETE FROM posting_place WHERE posting_id=?", (posting_id,))
+    for place in found:
+        conn.execute("INSERT OR IGNORE INTO posting_place (posting_id, place) VALUES (?,?)",
+                     (posting_id, place))
+    conn.execute("UPDATE posting SET is_remote=?, is_hybrid=? WHERE id=?",
+                 (int(is_remote), int(is_hybrid), posting_id))
 
     # Workability is recorded, not enforced. The posting stays in the database and
     # in the UI; it is folded out of the default view behind a visible count.

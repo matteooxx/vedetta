@@ -19,6 +19,7 @@ from flask import (Flask, abort, flash, redirect, render_template, request,
 
 from .. import config as config_mod
 from .. import configstore
+from .. import facets
 from .. import db as db_mod
 from .. import run as run_mod
 from ..runlock import RunInProgress, acquire
@@ -120,62 +121,16 @@ def create_app() -> Flask:
     def postings():
         cfg = load_config()
         conn = open_db(cfg)
-        state = request.args.get("state", "open")
-        scope = request.args.get("scope", "workable")
-        query = request.args.get("q", "").strip()
-
-        where = []
-        params: list = []
-        if state == "open":
-            where.append("p.closed_run IS NULL")
-        elif state == "closed":
-            where.append("p.closed_run IS NOT NULL")
-        if query:
-            where.append("(p.title LIKE ? OR e.display_name LIKE ? OR p.location LIKE ?)")
-            params += [f"%{query}%"] * 3
-
-        base = ("FROM posting p JOIN employer e ON e.id = p.employer_id"
-                + (" WHERE " + " AND ".join(where) if where else ""))
-
-        # Both counts come from the same filtered set, so the number on screen is
-        # exactly what the toggle would reveal. The excluded count is ALWAYS shown:
-        # folding postings away silently is the failure this whole project exists to
-        # prevent, and a visible number is the difference.
-        totals = conn.execute(
-            f"""SELECT
-                  sum(CASE WHEN p.workable=1 THEN 1 ELSE 0 END) AS workable,
-                  sum(CASE WHEN p.workable=0 THEN 1 ELSE 0 END) AS excluded
-                {base}""", params).fetchone()
-        counts = {"workable": totals["workable"] or 0,
-                  "excluded": totals["excluded"] or 0}
-
-        scoped = list(where)
-        if scope == "workable":
-            scoped.append("p.workable=1")
-        elif scope == "excluded":
-            scoped.append("p.workable=0")
-        sql = ("""SELECT p.*, e.display_name AS employer,
-                         (SELECT state FROM triage t WHERE t.posting_id = p.id) AS triage
-                  FROM posting p JOIN employer e ON e.id = p.employer_id"""
-               + (" WHERE " + " AND ".join(scoped) if scoped else "")
-               + " ORDER BY p.id DESC LIMIT 300")
-
-        rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
-        for row in rows:
-            row["labels"] = [dict(l) for l in conn.execute(
-                """SELECT kind, severity, value, explain, produced_by
-                   FROM label WHERE posting_id=? ORDER BY severity, rule_id""",
-                (row["id"],)).fetchall()]
-
-        reasons = [dict(r) for r in conn.execute(
-            f"""SELECT p.blocked_by AS reason, count(*) AS n {base}
-                {"AND" if where else "WHERE"} p.workable=0 AND p.blocked_by IS NOT NULL
-                GROUP BY p.blocked_by ORDER BY n DESC LIMIT 8""", params).fetchall()]
+        selection = facets.Selection.from_request(request.args)
+        rows = facets.page(conn, selection)
+        view = {
+            "scopes": facets.scope_counts(conn, selection),
+            "options": facets.options(conn, selection),
+            "total": facets.total(conn, selection),
+        }
         conn.close()
-        return render_template("postings.html", postings=rows, state=state,
-                               scope=scope, q=query, counts=counts,
-                               reasons=reasons,
-                               profile_on=cfg.profile.configured)
+        return render_template("postings.html", postings=rows, sel=selection,
+                               view=view, profile_on=cfg.profile.configured)
 
     @app.post("/postings/<int:posting_id>/triage")
     def triage(posting_id: int):
@@ -301,6 +256,29 @@ def create_app() -> Flask:
         flash("Run finished: " + ", ".join(parts)
               + ". No mail was sent from here - the scheduled run does that.", "ok")
         return redirect(url_for("dashboard"))
+
+    @app.post("/relabel")
+    def relabel_now():
+        """Re-apply the current rules and profile to every stored posting.
+
+        Without this the interface lies after a configuration edit: the postings on
+        screen keep their old verdicts, so a filter you just widened appears to have
+        done nothing.
+        """
+        cfg = load_config()
+        conn = open_db(cfg)
+        lock_path = Path(cfg.db_path).parent / "run.lock"
+        try:
+            with acquire(lock_path, owner="web-ui:relabel"):
+                stats = run_mod.relabel(conn, cfg)
+        except RunInProgress as exc:
+            conn.close()
+            flash(str(exc), "warn")
+            return redirect(request.referrer or url_for("dashboard"))
+        conn.close()
+        flash(f"Re-evaluated {stats['postings']} postings: {stats['workable']} workable, "
+              f"{stats['excluded']} excluded and still listed.", "ok")
+        return redirect(request.referrer or url_for("postings"))
 
     @app.route("/health")
     def health():

@@ -84,12 +84,23 @@ CREATE TABLE IF NOT EXISTS posting (
   -- never deleted: the count is always shown and one click reveals them.
   workable       INTEGER NOT NULL DEFAULT 1,
   blocked_by     TEXT,
+  is_remote      INTEGER NOT NULL DEFAULT 0,
+  is_hybrid      INTEGER NOT NULL DEFAULT 0,
   raw            TEXT
 );
 CREATE INDEX IF NOT EXISTS posting_recon
   ON posting(employer_id, title_norm, location_norm);
 CREATE INDEX IF NOT EXISTS posting_workable
   ON posting(workable, closed_run, id);
+
+-- One row per place mentioned by a posting. A free-text location column cannot be
+-- faceted, and a posting routinely names several places.
+CREATE TABLE IF NOT EXISTS posting_place (
+  posting_id INTEGER NOT NULL REFERENCES posting(id) ON DELETE CASCADE,
+  place      TEXT NOT NULL,
+  PRIMARY KEY (posting_id, place)
+);
+CREATE INDEX IF NOT EXISTS posting_place_place ON posting_place(place);
 
 CREATE TABLE IF NOT EXISTS sighting (
   id           INTEGER PRIMARY KEY,
@@ -150,6 +161,8 @@ MIGRATIONS = {
     "posting": {
         "workable": "INTEGER NOT NULL DEFAULT 1",
         "blocked_by": "TEXT",
+        "is_remote": "INTEGER NOT NULL DEFAULT 0",
+        "is_hybrid": "INTEGER NOT NULL DEFAULT 0",
     },
 }
 
