@@ -112,9 +112,21 @@ def create_app() -> Flask:
                    WHERE enabled=1 AND verified_on IS NULL""").fetchone()[0],
         }
         unwatched = run_mod.unwatched(conn)
+        # Which platforms this build can actually speak to, and which configured
+        # sources it cannot. A stale container is otherwise invisible: its Run Now
+        # writes errors that read like failures at the employer's end.
+        configured = [r[0] for r in conn.execute(
+            """SELECT DISTINCT platform FROM source
+               WHERE enabled=1 AND verified_on IS NOT NULL""")]
+        build = {
+            "adapters": sorted(run_mod.ADAPTERS),
+            "missing": sorted(p for p in configured if p not in run_mod.ADAPTERS),
+            "version": __import__("vedetta").__version__,
+        }
         conn.close()
         return render_template("dashboard.html", last=last, polls=polls,
-                               counts=counts, unwatched=unwatched, cfg=cfg)
+                               counts=counts, unwatched=unwatched, cfg=cfg,
+                               build=build)
 
     # ------------------------------------------------------------------- postings
     @app.route("/postings")

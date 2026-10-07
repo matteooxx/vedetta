@@ -149,8 +149,13 @@ textarea{width:100%;min-height:60vh;font-family:var(--mono);font-size:13px;
   align-items:start}
 @media(max-width:860px){.layout{grid-template-columns:1fr}}
 .panel{border:1px solid var(--rule);border-radius:var(--radius);padding:14px;
-  background:var(--raised);position:sticky;top:12px}
-@media(max-width:860px){.panel{position:static}}
+  background:var(--raised);position:sticky;top:12px;
+  /* The panel scrolls on its own. Sticky alone was not enough: once the facet list
+     is taller than the viewport, reaching the bottom filters meant scrolling past
+     every posting first. */
+  max-height:calc(100vh - 24px);overflow-y:auto;overscroll-behavior:contain;
+  scrollbar-width:thin}
+@media(max-width:860px){.panel{position:static;max-height:none;overflow:visible}}
 .results{min-width:0}
 
 .facet{border-top:1px solid var(--rule);padding:9px 0 4px;margin-top:6px}

@@ -13,6 +13,17 @@ find out whether it ran and what it saw.</p>
   <div class="tile"><div class="n">{{ counts.employers }}</div><div class="k">employers</div></div>
 </div>
 
+{% if build and build.missing %}
+<div class="flash error">
+  <strong>This interface is running an out-of-date build.</strong>
+  It can speak to {{ build.adapters | join(', ') }}, but your watchlist also uses
+  {{ build.missing | join(', ') }}. Any run started from here will report those
+  sources as failing when nothing is wrong with them — rebuild the image and redeploy
+  the app, then run again. The scheduled run uses a fresh container each time and is
+  unaffected.
+</div>
+{% endif %}
+
 <h2>Last run</h2>
 {% if last %}
 <p class="small muted">Run <strong>{{ last.id }}</strong>
@@ -57,6 +68,10 @@ visible &mdash; leaving them out would look exactly like having nothing to repor
 {% endif %}
 
 <h2>Run now</h2>
+{% if build %}
+<p class="small muted">This build speaks {{ build.adapters | join(', ') }}
+  (version {{ build.version }}).</p>
+{% endif %}
 <p class="small">Polls every confirmed source immediately, using the same code as the
 scheduled run. It does not send mail &mdash; the scheduled run does that.</p>
 <form method="post" action="{{ url_for('run_now') }}" id="run-form">

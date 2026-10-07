@@ -84,8 +84,16 @@ def poll(conn, run_id: int, source: dict, seeding: bool = False) -> tuple[str, l
     platform = source["platform"]
     adapter_cls = ADAPTERS.get(platform)
     if adapter_cls is None:
-        _record_poll(conn, run_id, source["id"], "error", None, None, 0,
-                     f"no adapter for platform '{platform}'")
+        # Worth spelling out: this is a deployment fact, not a fault at the
+        # employer's end, and the two look identical in a list of errors. It
+        # happened for real - the interface kept running an older image after new
+        # adapters were built, so its Run Now reported fifteen "errors" that were
+        # nothing of the kind.
+        _record_poll(
+            conn, run_id, source["id"], "error", None, None, 0,
+            f"this build has no adapter for '{platform}' - the source is fine, the "
+            f"running image is out of date (built with: "
+            f"{', '.join(sorted(ADAPTERS))})")
         return "error", []
 
     started = time.monotonic()
