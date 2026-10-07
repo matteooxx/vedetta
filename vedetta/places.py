@@ -36,7 +36,11 @@ SPLIT = re.compile(r"[;/|•]|,|\s[-–—]\s|\sor\s|\sand\s", re.I)
 PARENS = re.compile(r"[()\[\]]")
 WS = re.compile(r"\s+")
 
-REMOTE = re.compile(r"\b(remote|work from home|wfh|anywhere|distributed|virtual)\b", re.I)
+# "Home based" is a working pattern, not a place. Catching it here is also genuinely
+# informative: one watched employer writes every one of its postings that way.
+REMOTE = re.compile(
+    r"\b(remote|remotely|work from home|home[- ]based|home office|wfh|anywhere"
+    r"|distributed|virtual)\b", re.I)
 HYBRID = re.compile(r"\b(hybrid|flexible)\b", re.I)
 
 # Fragments that are not places: modifiers, region groupings, filler.
@@ -52,6 +56,9 @@ NOISE = {
     "idf", "anz", "dach", "benelux", "nordics", "nordic", "mena", "cee", "ukandi",
     "us east", "us west", "east", "west", "north", "south", "central", "eastern",
     "western", "northern", "southern", "coast",
+    # Seen live: one employer writes every location as "Home based - EMEA" or
+    # "Home Based - Americas", which produced a place called "Home".
+    "home", "home based", "office based", "americas", "apj", "unknown",
 }
 
 # Variants collapsed so the facet list is short and obvious rather than a long tail
@@ -129,6 +136,8 @@ def _places_in(fragment: str) -> list[str]:
     if whole in ALIASES:
         return [ALIASES[whole]]
     if not whole or whole in NOISE or re.fullmatch(r"\d+\s*\w*", whole):
+        return []
+    if len(whole.replace(" ", "")) < 2:
         return []
 
     out: list[str] = []

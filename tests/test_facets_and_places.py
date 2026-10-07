@@ -31,9 +31,35 @@ def test_places_extracted(raw, expected):
     assert extract(raw)[0] == expected
 
 
-@pytest.mark.parametrize("raw", ["2 Locations", "Remote", "EMEA - Remote", "", None])
+@pytest.mark.parametrize("raw", [
+    "2 Locations", "Remote", "EMEA - Remote", "", None,
+    # All seen live. "Home based - EMEA" produced a place called "Home" and "N/A"
+    # produced two places called "N" and "A", both of which became facet options.
+    "Home based - EMEA",
+    "Home Based - Americas; Home Based - APAC",
+    "Home based - Worldwide",
+    "N/A",
+])
 def test_strings_with_no_place_yield_none(raw):
     assert extract(raw)[0] == []
+
+
+@pytest.mark.parametrize("raw", [
+    "Home based - EMEA", "Home Office, Germany", "Work From Home - United States",
+])
+def test_home_based_counts_as_remote(raw):
+    """A working pattern, not a place - but still worth recording as remote.
+
+    One watched employer writes every posting this way, so losing the flag would
+    make its whole board look office-bound.
+    """
+    assert extract(raw)[1] is True
+
+
+def test_a_real_office_survives_a_home_based_sibling():
+    places, remote, _ = extract("Home based - EMEA; Office Based - London, UK")
+    assert places == ["London", "United Kingdom"]
+    assert remote is True
 
 
 def test_remote_is_a_flag_not_a_place():
