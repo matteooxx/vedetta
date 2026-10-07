@@ -86,6 +86,8 @@ all your other choices.</p>
     {{ facet('place',    'Location', view.options.place, open=true, limit=14,
              hint='A posting naming several places appears under each of them.') }}
     {{ facet('employer', 'Employer', view.options.employer, limit=14) }}
+    {{ facet('skill', 'Technologies', view.options.skill, limit=18,
+             hint='Green on a card means it is on your list, amber means it is not. Neither is a verdict.') }}
     {{ facet('mode',     'Working pattern', view.options.mode, open=true, limit=3) }}
     {{ facet('age',      'Published', view.options.age, limit=4) }}
     {{ facet('label',    'Labels', view.options.label, limit=16,

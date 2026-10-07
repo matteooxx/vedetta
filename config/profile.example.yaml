@@ -139,6 +139,65 @@ locations:
   # guessing a country.
   remote_counts_as_acceptable: true
 
+skills:
+  # Technologies and practices you can honestly claim. Vedetta compares each posting
+  # against this list and shows which of ITS terms are missing from yours.
+  #
+  # It only ever SHOWS the difference. There is no score and no verdict: whether a
+  # gap matters is a judgement about your own experience, and a program guessing at
+  # that would be worse than useless - it would be confidently wrong in writing.
+  #
+  # Matching is case-insensitive and whole-word, so "AWS" catches "AWS Lambda" but
+  # "Java" does not catch "JavaScript".
+  have:
+    - Linux
+    - Docker
+    - Kubernetes
+    - Terraform
+    - AWS
+    - Azure
+    - CI/CD
+    - GitLab
+    - GitHub Actions
+    - Python
+    - Bash
+    - Git
+    - Grafana
+    - Prometheus
+    - Ansible
+    - SQL
+    - REST
+    - Networking
+    - Monitoring
+    - Observability
+
+  # Terms worth noticing in a posting even if they are not on your list. Keep this
+  # short: the point is a handful of decisive technologies, not a tag cloud.
+  watch:
+    - OpenShift
+    - Helm
+    - ArgoCD
+    - Jenkins
+    - Elasticsearch
+    - Kafka
+    - Snowflake
+    - Databricks
+    - Go
+    - Rust
+    - Java
+    - TypeScript
+    - React
+    - PostgreSQL
+    - MongoDB
+    - Redis
+    - Datadog
+    - Splunk
+    - Dynatrace
+    - Pulumi
+    - GCP
+    - Serverless
+    - Microservices
+
 tracks:
   # Require a positive match from the `cluster` rules in rules.yaml. Without this,
   # every recruiter, designer and finance role on a 400-posting board counts as

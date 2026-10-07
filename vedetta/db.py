@@ -113,6 +113,17 @@ CREATE TABLE IF NOT EXISTS sighting (
 );
 CREATE INDEX IF NOT EXISTS sighting_key ON sighting(source_id, platform_key);
 
+-- Technologies a posting names, split by whether the reader claims them. Stored
+-- rather than computed on the fly so the terms can be filtered on, which turns a
+-- read-only observation into a way to find work.
+CREATE TABLE IF NOT EXISTS posting_skill (
+  posting_id INTEGER NOT NULL REFERENCES posting(id) ON DELETE CASCADE,
+  term       TEXT NOT NULL,
+  have       INTEGER NOT NULL,
+  PRIMARY KEY (posting_id, term)
+);
+CREATE INDEX IF NOT EXISTS posting_skill_term ON posting_skill(term, have);
+
 CREATE TABLE IF NOT EXISTS label (
   id          INTEGER PRIMARY KEY,
   posting_id  INTEGER NOT NULL REFERENCES posting(id) ON DELETE CASCADE,

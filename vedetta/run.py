@@ -15,6 +15,7 @@ import time
 from datetime import datetime, timezone
 
 from . import places as places_mod
+from .skills import SkillMatcher
 from .adapters.base import AdapterError, normalise
 from .adapters.greenhouse import GreenhouseAdapter
 from .adapters.sitemap import SitemapAdapter
@@ -231,7 +232,8 @@ def record_sighting(conn, run_id, source, posting_id, item):
 
 def label_posting(conn, engine: RuleEngine, posting_id: int, text: str,
                   title: str | None = None, profile=None,
-                  location: str | None = None) -> list:
+                  location: str | None = None, matcher=None,
+                  employer: str | None = None) -> list:
     """Regex rules plus the profile's structured labels.
 
     Two independent labellers over the same posting, each carrying its own
@@ -254,6 +256,19 @@ def label_posting(conn, engine: RuleEngine, posting_id: int, text: str,
         )
     if any(l.kind == "pipeline" for l in labels):
         conn.execute("UPDATE posting SET is_pipeline=1 WHERE id=?", (posting_id,))
+
+    # Which technologies the posting names, split by whether the reader claims them.
+    # A difference, never a score: whether a gap matters is a judgement about the
+    # reader's own experience and the program has no business guessing at it.
+    if matcher is not None and matcher.configured:
+        comparison = matcher.compare(text, employer=employer)
+        conn.execute("DELETE FROM posting_skill WHERE posting_id=?", (posting_id,))
+        for term in comparison["matched"]:
+            conn.execute("INSERT OR IGNORE INTO posting_skill (posting_id, term, have) "
+                         "VALUES (?,?,1)", (posting_id, term))
+        for term in comparison["missing"]:
+            conn.execute("INSERT OR IGNORE INTO posting_skill (posting_id, term, have) "
+                         "VALUES (?,?,0)", (posting_id, term))
 
     # Normalised places, so the location can be filtered on rather than only read.
     found, is_remote, is_hybrid = places_mod.extract(location)
@@ -329,6 +344,7 @@ def execute(conn, config, trigger: str = "manual", force_seed: bool = False) -> 
     run_id = start_run(conn, trigger, seeding)
     engine = RuleEngine(config.rules)
     profile = config.profile
+    matcher = SkillMatcher(config.profile_doc)
 
     report = {
         "run_id": run_id, "seeding": seeding, "polls": [], "new": [],
@@ -353,7 +369,9 @@ def execute(conn, config, trigger: str = "manual", force_seed: bool = False) -> 
             if is_new:
                 labels = label_posting(conn, engine, posting_id,
                                        item.text or item.title, title=item.title,
-                                       profile=profile, location=item.location)
+                                       profile=profile, location=item.location,
+                                       matcher=matcher,
+                                       employer=source["employer_name"])
                 # A posting from a source being seeded is recorded and labelled, but
                 # kept out of the digest: it is history, not news.
                 bucket = "seeded" if source["id"] in seeding_sources else "new"
@@ -370,6 +388,8 @@ def execute(conn, config, trigger: str = "manual", force_seed: bool = False) -> 
                     "labels": [l.__dict__ for l in labels],
                     "score": score(labels, (config.settings.get("ranking") or {}).get("weights")),
                     "platform": source["platform"],
+                    "skills": _skill_line(matcher, item.text or item.title,
+                                          source["employer_name"]),
                     "workable": not blocking,
                     "blocked_by": [l.explain for l in blocking],
                 })
@@ -391,6 +411,13 @@ def execute(conn, config, trigger: str = "manual", force_seed: bool = False) -> 
     return report
 
 
+def _skill_line(matcher, text: str, employer: str | None = None) -> str | None:
+    if matcher is None or not matcher.configured:
+        return None
+    from .skills import summarise
+    return summarise(matcher.compare(text, employer=employer))
+
+
 def mark_digest_sent(conn, run_id: int) -> None:
     conn.execute("UPDATE run SET digest_sent=1 WHERE id=?", (run_id,))
     conn.commit()
@@ -409,8 +436,11 @@ def relabel(conn, config) -> dict:
     """
     engine = RuleEngine(config.rules)
     profile = config.profile
+    matcher = SkillMatcher(config.profile_doc)
     rows = conn.execute(
-        "SELECT id, title, location, raw FROM posting ORDER BY id").fetchall()
+        """SELECT p.id, p.title, p.location, p.raw, e.display_name AS employer
+           FROM posting p JOIN employer e ON e.id = p.employer_id
+           ORDER BY p.id""").fetchall()
 
     stats = {"postings": 0, "workable": 0, "excluded": 0}
     for row in rows:
@@ -427,7 +457,8 @@ def relabel(conn, config) -> dict:
                 pass
         conn.execute("DELETE FROM label WHERE posting_id=?", (row["id"],))
         labels = label_posting(conn, engine, row["id"], text, title=row["title"],
-                               profile=profile, location=row["location"])
+                               profile=profile, location=row["location"],
+                               matcher=matcher, employer=row["employer"])
         stats["postings"] += 1
         if profile.configured and profile.blocked_by(labels):
             stats["excluded"] += 1

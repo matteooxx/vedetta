@@ -86,6 +86,8 @@ def render_text(report: dict, config=None) -> str:
             when = posting.get("published_at") or "date not supplied"
             lines.append(f"    {where} | published {when} | score {posting['score']:+d}")
             lines.append(f"    {_labels_line(posting['labels'])}")
+            if posting.get("skills"):
+                lines.append(f"    {posting['skills']}")
             if posting.get("url"):
                 lines.append(f"    {posting['url']}")
             lines.append("")

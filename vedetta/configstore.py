@@ -121,6 +121,15 @@ def _validate_profile(doc: dict) -> None:
     for key in ("years", "max_years_requested"):
         if experience.get(key) is not None and not isinstance(experience[key], int):
             raise ConfigError(f"'experience.{key}' must be a whole number")
+    skills = doc.get("skills")
+    if skills is not None:
+        if not isinstance(skills, dict):
+            raise ConfigError("'skills' must be a mapping with 'have' and 'watch'")
+        for bucket in ("have", "watch"):
+            value = skills.get(bucket)
+            if value is not None and not isinstance(value, list):
+                raise ConfigError(f"'skills.{bucket}' must be a list")
+
     exclude = doc.get("exclude_if")
     if exclude is not None and not isinstance(exclude, list):
         raise ConfigError("'exclude_if' must be a list of rule ids")

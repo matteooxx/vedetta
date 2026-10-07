@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 
 # facet name -> (query parameter, SQL fragment template)
 # Each fragment is written to accept a list of values.
-FACETS = ("employer", "place", "label", "triage", "mode", "age")
+FACETS = ("employer", "place", "skill", "label", "triage", "mode", "age")
 
 AGE_DAYS = {"24h": 1, "3d": 3, "7d": 7, "30d": 30}
 AGE_LABELS = {"24h": "Last 24 hours", "3d": "Last 3 days",
@@ -42,6 +42,7 @@ class Selection:
     place: list[str] = field(default_factory=list)
     label: list[str] = field(default_factory=list)
     triage: list[str] = field(default_factory=list)
+    skill: list[str] = field(default_factory=list)
     mode: list[str] = field(default_factory=list)
     age: list[str] = field(default_factory=list)
 
@@ -54,6 +55,7 @@ class Selection:
             employer=[v for v in args.getlist("employer") if v],
             place=[v for v in args.getlist("place") if v],
             label=[v for v in args.getlist("label") if v],
+            skill=[v for v in args.getlist("skill") if v],
             triage=[v for v in args.getlist("triage") if v],
             mode=[v for v in args.getlist("mode") if v],
             age=[v for v in args.getlist("age") if v],
@@ -119,6 +121,12 @@ def _clauses(selection: Selection, skip: str | None = None) -> tuple[list[str], 
                      f"WHERE pp.posting_id = p.id AND pp.place IN ({marks}))")
         params += selection.place
 
+    if skip != "skill" and selection.skill:
+        marks = ",".join("?" * len(selection.skill))
+        where.append(f"EXISTS (SELECT 1 FROM posting_skill ps "
+                     f"WHERE ps.posting_id = p.id AND ps.term IN ({marks}))")
+        params += selection.skill
+
     if skip != "label" and selection.label:
         marks = ",".join("?" * len(selection.label))
         where.append(f"EXISTS (SELECT 1 FROM label l "
@@ -180,6 +188,12 @@ def page(conn, selection: Selection, limit: int = 200) -> list[dict]:
         row["places"] = [x[0] for x in conn.execute(
             "SELECT place FROM posting_place WHERE posting_id=? ORDER BY place",
             (row["id"],)).fetchall()]
+        row["skills_have"] = [x[0] for x in conn.execute(
+            "SELECT term FROM posting_skill WHERE posting_id=? AND have=1 ORDER BY term",
+            (row["id"],)).fetchall()]
+        row["skills_missing"] = [x[0] for x in conn.execute(
+            "SELECT term FROM posting_skill WHERE posting_id=? AND have=0 ORDER BY term",
+            (row["id"],)).fetchall()]
     return rows
 
 
@@ -219,6 +233,15 @@ def options(conn, selection: Selection) -> dict:
            + (" WHERE " + " AND ".join(where) if where else "")
            + " GROUP BY pp.place HAVING n > 0 ORDER BY n DESC, pp.place LIMIT 60")
     out["place"] = [dict(r) for r in conn.execute(sql, params).fetchall()]
+
+    where, params = _clauses(selection, "skill")
+    sql = ("SELECT ps.term AS value, ps.term AS label, max(ps.have) AS have, "
+           "count(DISTINCT ps.posting_id) AS n "
+           "FROM posting_skill ps JOIN posting p ON p.id = ps.posting_id "
+           "JOIN employer e ON e.id = p.employer_id"
+           + (" WHERE " + " AND ".join(where) if where else "")
+           + " GROUP BY ps.term ORDER BY n DESC, ps.term LIMIT 40")
+    out["skill"] = [dict(r) for r in conn.execute(sql, params).fetchall()]
 
     where, params = _clauses(selection, "label")
     sql = ("SELECT l.rule_id AS value, min(l.explain) AS label, min(l.severity) AS severity, "
