@@ -18,11 +18,15 @@ from . import places as places_mod
 from .adapters.base import AdapterError, normalise
 from .adapters.greenhouse import GreenhouseAdapter
 from .adapters.sitemap import SitemapAdapter
+from .adapters.smartrecruiters import SmartRecruitersAdapter
+from .adapters.workday import WorkdayAdapter
 from .labels.engine import RuleEngine, now_iso, score
 
 ADAPTERS = {
     GreenhouseAdapter.platform: GreenhouseAdapter,
     SitemapAdapter.platform: SitemapAdapter,
+    SmartRecruitersAdapter.platform: SmartRecruitersAdapter,
+    WorkdayAdapter.platform: WorkdayAdapter,
 }
 
 
@@ -86,15 +90,15 @@ def poll(conn, run_id: int, source: dict, seeding: bool = False) -> tuple[str, l
 
     started = time.monotonic()
     try:
-        adapter = adapter_cls()
-        if platform == SitemapAdapter.platform:
-            # No detail-page budget on a first pass: the whole board has to be
-            # recorded once, or its remainder would arrive as "new" tomorrow and be
-            # emailed as news when it is in fact history.
-            items = adapter.fetch(source, known_keys=known_keys(conn, source["id"]),
-                                  detail_budget=None if seeding else 150)
-        else:
-            items = adapter.fetch(source)
+        # Every adapter takes the same two arguments; those whose listing already
+        # carries everything ignore them. No detail budget on a first pass: the whole
+        # board has to be recorded once, or its remainder would arrive as "new"
+        # tomorrow and be mailed as news when it is in fact history.
+        items = adapter_cls().fetch(
+            source,
+            known_keys=known_keys(conn, source["id"]),
+            detail_budget=None if seeding else 150,
+        )
     except AdapterError as exc:
         _record_poll(conn, run_id, source["id"], "error", exc.http_status, None,
                      int((time.monotonic() - started) * 1000), str(exc))

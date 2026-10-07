@@ -21,7 +21,10 @@ BASE = "https://boards-api.greenhouse.io/v1/boards/{identifier}/jobs"
 class GreenhouseAdapter(Adapter):
     platform = "greenhouse"
 
-    def fetch(self, source: dict) -> list[RawPosting]:
+    def fetch(self, source: dict, known_keys: set[str] | None = None,
+              detail_budget: int | None = None) -> list[RawPosting]:
+        # The board listing already carries the description, so neither
+        # argument applies: one request returns everything.
         identifier = source["identifier"]
         url = source.get("endpoint") or BASE.format(identifier=identifier)
         # content=true returns the description, which the rule engine needs to see

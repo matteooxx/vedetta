@@ -62,7 +62,22 @@ class Adapter:
             timeout=self.timeout,
         )
 
-    def fetch(self, source: dict) -> list[RawPosting]:  # pragma: no cover
+    def fetch(self, source: dict, known_keys: set[str] | None = None,
+              detail_budget: int | None = None) -> list[RawPosting]:  # pragma: no cover
+        """Return one posting per opening on this source.
+
+        ``known_keys`` are the platform keys already recorded for this source. An
+        adapter that has to fetch a second request per posting to get its text uses
+        this to avoid re-reading what it already knows, emitting a minimal entry
+        instead so the posting is not mistaken for closed.
+
+        ``detail_budget`` caps how many of those second requests one run may make.
+        ``None`` means no cap, which is what a first pass over a source wants: a cap
+        there would leave the remainder to arrive as "new" tomorrow and be mailed as
+        news when it is in fact history.
+
+        An adapter whose listing already carries everything ignores both.
+        """
         raise NotImplementedError
 
 
