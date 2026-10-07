@@ -17,10 +17,12 @@ from datetime import datetime, timezone
 from . import places as places_mod
 from .adapters.base import AdapterError, normalise
 from .adapters.greenhouse import GreenhouseAdapter
+from .adapters.sitemap import SitemapAdapter
 from .labels.engine import RuleEngine, now_iso, score
 
 ADAPTERS = {
     GreenhouseAdapter.platform: GreenhouseAdapter,
+    SitemapAdapter.platform: SitemapAdapter,
 }
 
 
@@ -69,7 +71,12 @@ def unwatched(conn) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def poll(conn, run_id: int, source: dict) -> tuple[str, list]:
+def known_keys(conn, source_id: int) -> set[str]:
+    return {r[0] for r in conn.execute(
+        "SELECT DISTINCT platform_key FROM sighting WHERE source_id=?", (source_id,))}
+
+
+def poll(conn, run_id: int, source: dict, seeding: bool = False) -> tuple[str, list]:
     platform = source["platform"]
     adapter_cls = ADAPTERS.get(platform)
     if adapter_cls is None:
@@ -79,7 +86,15 @@ def poll(conn, run_id: int, source: dict) -> tuple[str, list]:
 
     started = time.monotonic()
     try:
-        items = adapter_cls().fetch(source)
+        adapter = adapter_cls()
+        if platform == SitemapAdapter.platform:
+            # No detail-page budget on a first pass: the whole board has to be
+            # recorded once, or its remainder would arrive as "new" tomorrow and be
+            # emailed as news when it is in fact history.
+            items = adapter.fetch(source, known_keys=known_keys(conn, source["id"]),
+                                  detail_budget=None if seeding else 150)
+        else:
+            items = adapter.fetch(source)
     except AdapterError as exc:
         _record_poll(conn, run_id, source["id"], "error", exc.http_status, None,
                      int((time.monotonic() - started) * 1000), str(exc))
@@ -140,6 +155,11 @@ def reconcile(conn, run_id: int, source: dict, item) -> tuple[int, bool]:
                      (run_id, posting_id))
         return posting_id, False
 
+    if not item.title:
+        # A re-sighting with no payload (the sitemap adapter emits these for URLs it
+        # already knows). There is nothing to reconcile and nothing to create.
+        return None, False
+
     title_norm = normalise(item.title)
     location_norm = normalise(item.location)
 
@@ -178,10 +198,22 @@ def reconcile(conn, run_id: int, source: dict, item) -> tuple[int, bool]:
 
 
 def record_sighting(conn, run_id, source, posting_id, item):
+    digest = item.content_hash()
+    if not item.title:
+        # A minimal re-sighting: the sitemap adapter emits these for URLs it already
+        # knows, without re-reading the page. Hashing the empty payload would make
+        # every one of them look edited the moment edit detection exists, so the
+        # previous hash is carried forward instead.
+        previous = conn.execute(
+            """SELECT content_hash FROM sighting
+               WHERE source_id=? AND platform_key=? ORDER BY id DESC LIMIT 1""",
+            (source["id"], item.platform_key)).fetchone()
+        if previous:
+            digest = previous[0]
     conn.execute(
         """INSERT OR IGNORE INTO sighting (run_id, source_id, posting_id, platform_key, content_hash)
            VALUES (?,?,?,?,?)""",
-        (run_id, source["id"], posting_id, item.platform_key, item.content_hash()),
+        (run_id, source["id"], posting_id, item.platform_key, digest),
     )
 
 
@@ -294,7 +326,8 @@ def execute(conn, config, trigger: str = "manual", force_seed: bool = False) -> 
     }
 
     for source in sources:
-        outcome, items = poll(conn, run_id, source)
+        outcome, items = poll(conn, run_id, source,
+                              seeding=source["id"] in seeding_sources)
         report["polls"].append({
             "employer": source["employer_name"], "platform": source["platform"],
             "outcome": outcome, "count": len(items),
@@ -302,6 +335,8 @@ def execute(conn, config, trigger: str = "manual", force_seed: bool = False) -> 
         })
         for item in items:
             posting_id, is_new = reconcile(conn, run_id, source, item)
+            if posting_id is None:
+                continue
             record_sighting(conn, run_id, source, posting_id, item)
             if is_new:
                 labels = label_posting(conn, engine, posting_id,
