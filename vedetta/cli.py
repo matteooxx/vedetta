@@ -13,8 +13,7 @@ import sys
 from . import config as config_mod
 from . import db as db_mod
 from . import run as run_mod
-from . import mailbox as mailbox_mod
-from .digest import mail, render
+from .digest import mail, outbox, render
 from .runlock import RunInProgress, acquire
 
 
@@ -69,6 +68,15 @@ def cmd_run(args) -> int:
         conn.close()
         return 0
 
+    if cfg.transport == "host":
+        # Handed to the host rather than sent from here: the machine already has a
+        # working mail configuration, so this application needs no credential of its
+        # own. The runner delivers it and records the delivery.
+        path = outbox.write(cfg.db_path, report["run_id"], subject_line, body)
+        print(f"digest queued for the host transport: {path}")
+        conn.close()
+        return 0
+
     try:
         result = mail.send(subject_line, body, cfg.digest)
         run_mod.mark_digest_sent(conn, report["run_id"])
@@ -99,38 +107,39 @@ def cmd_relabel(args) -> int:
     return 0
 
 
-def cmd_mail(args) -> int:
-    """Read the job mailbox and record what looks like an application outcome.
+def cmd_outbox(args) -> int:
+    """List, print or retire queued digests.
 
-    Read-only throughout, and nothing it finds changes a triage stage: the
-    observations wait for a human in the interface.
+    Exists so the queue is inspectable by a person and not only by the runner: a
+    digest sitting undelivered is a fault, and a fault nobody can see is the kind
+    this project is organised against.
     """
     cfg = _load(args)
-    config = mailbox_mod.MailboxConfig.from_env(cfg.settings.get("mailbox"))
-    if not config.configured:
-        print("mailbox not configured: set VEDETTA_SMTP_USER and "
-              "VEDETTA_SMTP_PASSWORD (one Gmail app password serves both sending "
-              "and reading)", file=sys.stderr)
-        return 2
-    conn = db_mod.connect(cfg.db_path)
-    try:
-        observations = mailbox_mod.fetch(config)
-    except mailbox_mod.MailboxNotConfigured as exc:
-        print(f"mailbox not configured ({exc})", file=sys.stderr)
+    waiting = outbox.pending(cfg.db_path)
+    if args.sent is not None:
+        conn = db_mod.connect(cfg.db_path)
+        run_mod.mark_digest_sent(conn, args.sent)
         conn.close()
-        return 2
-    except Exception as exc:
-        print(f"mailbox read failed: {type(exc).__name__}: {exc}", file=sys.stderr)
-        conn.close()
+        for item in waiting:
+            if item.run_id == args.sent:
+                outbox.clear(item.path)
+        print(f"run {args.sent} recorded as delivered")
+        return 0
+    if args.show is not None:
+        for item in waiting:
+            if item.run_id == args.show:
+                print(item.subject)
+                print()
+                print(item.body)
+                return 0
+        print(f"no queued digest for run {args.show}", file=sys.stderr)
         return 1
-    stats = mailbox_mod.attach(conn, observations)
-    conn.close()
-    print(f"read {len(observations)} message(s) that look like an outcome")
-    print(f"  new          : {stats['stored']}")
-    print(f"  matched      : {stats['matched']}")
-    print(f"  unmatched    : {stats['unmatched']} (shown as unmatched, not guessed)")
-    print(f"  already known: {stats['already']}")
-    print("Nothing was marked read, and no triage stage was changed.")
+    if not waiting:
+        print("outbox empty")
+        return 0
+    print(f"{len(waiting)} digest(s) waiting for delivery:")
+    for item in waiting:
+        print(f"  run {item.run_id}: {item.subject}")
     return 0
 
 
@@ -157,8 +166,13 @@ def main(argv=None) -> int:
 
     sub.add_parser("relabel", help="re-apply rules and profile to stored postings"
                    ).set_defaults(func=cmd_relabel)
-    sub.add_parser("mail", help="read the job mailbox for application outcomes"
-                   ).set_defaults(func=cmd_mail)
+
+    outbox_parser = sub.add_parser("outbox", help="queued digests awaiting delivery")
+    outbox_parser.add_argument("--show", type=int, metavar="RUN",
+                               help="print the queued digest for a run")
+    outbox_parser.add_argument("--sent", type=int, metavar="RUN",
+                               help="record a run as delivered and remove it")
+    outbox_parser.set_defaults(func=cmd_outbox)
     sub.add_parser("check").set_defaults(func=cmd_check)
 
     args = parser.parse_args(argv)

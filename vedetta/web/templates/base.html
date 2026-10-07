@@ -220,9 +220,6 @@ a.tag:hover{background:var(--accent-soft)}
        aria-current="{{ 'page' if active=='insights' }}">Signals</a>
     <a href="{{ url_for('sources') }}" class="{{ 'on' if active=='sources' }}"
        aria-current="{{ 'page' if active=='sources' }}">Sources</a>
-    <a href="{{ url_for('mail_review') }}" class="{{ 'on' if active=='mail' }}"
-       aria-current="{{ 'page' if active=='mail' }}">Mail{% if mail_pending %}
-       <span class="badge" style="margin-left:4px">{{ mail_pending }}</span>{% endif %}</a>
     <a href="{{ url_for('config_edit', name='profile') }}" class="{{ 'on' if active=='config' }}"
        aria-current="{{ 'page' if active=='config' }}">Configuration</a>
   </nav>

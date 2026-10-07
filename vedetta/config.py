@@ -56,6 +56,12 @@ class Config:
         return Profile.from_dict(self.profile_doc)
 
     @property
+    def transport(self) -> str:
+        """`host` (the default) or `smtp`. See settings.example.yaml."""
+        value = str((self.settings.get("digest") or {}).get("transport") or "host")
+        return value.strip().lower()
+
+    @property
     def saved_views(self) -> list[dict]:
         views = self.settings.get("saved_views") or []
         return [v for v in views if isinstance(v, dict) and (v.get("name") or "").strip()]

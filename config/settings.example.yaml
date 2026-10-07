@@ -5,6 +5,18 @@ database: runtime/vedetta.db
 
 digest:
   subject_prefix: Vedetta
+
+  # How the digest is delivered.
+  #
+  #   host  - hand it to the machine's own mail configuration (the default).
+  #           The application needs no credential of its own: nothing to create,
+  #           nothing to rotate, nothing to leak. It writes the digest to an outbox
+  #           and the host's runner script delivers it, which also means an
+  #           undelivered digest is retried rather than lost.
+  #
+  #   smtp  - send it directly. Needs a mailbox and an app password in the runtime
+  #           environment file. Use this when there is no host mail to borrow.
+  transport: host
   # The server runs in UTC, so a fixed cron hour drifts by an hour across the
   # European daylight-saving change. Store the zone and resolve at run time.
   hour: "07:00"
@@ -42,21 +54,6 @@ ai_worker:
   # fit verdict. Its absence degrades the result and is reported; it never breaks
   # a run.
   url: null
-
-mailbox:
-  # Reading the job mailbox for application outcomes. Read-only IMAP: nothing is
-  # marked read, moved or deleted.
-  #
-  # Credentials come from the environment only. On Gmail one app password serves both
-  # sending the digest and reading the mailbox, so there is one secret to create and
-  # one to rotate - it needs 2-Step Verification on the account and IMAP enabled.
-  #
-  # Outcomes are classified by rules over sender and subject, never by a model, and
-  # an observation only ever PROPOSES a stage. A human accepts it.
-  host: imap.gmail.com
-  port: 993
-  folder: INBOX
-  days: 30        # how far back to look on each run
 
 saved_views:
   # Named filter combinations. The postings page writes here when you save a view,

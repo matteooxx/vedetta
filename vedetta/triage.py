@@ -12,9 +12,9 @@ the exact wording used, why a deviation was accepted. That file stays authoritat
 (ADR-0007). The stages past `applied` exist so the interface can show what is in
 flight, not to replace the record.
 
-**Nothing here is inferred.** A stage changes because a person said so. Reading
-outcomes from a mailbox is a separate, approved piece of work; when it arrives it will
-*propose* a stage with its evidence, and a human will still accept it.
+**Nothing here is inferred.** A stage changes because a person said so. Deriving
+outcomes from a mailbox was built and then removed at the operator's request: the
+application does not read anyone's mail, and a stage has no automatic source.
 """
 from __future__ import annotations
 
