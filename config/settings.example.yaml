@@ -43,6 +43,21 @@ ai_worker:
   # a run.
   url: null
 
+mailbox:
+  # Reading the job mailbox for application outcomes. Read-only IMAP: nothing is
+  # marked read, moved or deleted.
+  #
+  # Credentials come from the environment only. On Gmail one app password serves both
+  # sending the digest and reading the mailbox, so there is one secret to create and
+  # one to rotate - it needs 2-Step Verification on the account and IMAP enabled.
+  #
+  # Outcomes are classified by rules over sender and subject, never by a model, and
+  # an observation only ever PROPOSES a stage. A human accepts it.
+  host: imap.gmail.com
+  port: 993
+  folder: INBOX
+  days: 30        # how far back to look on each run
+
 saved_views:
   # Named filter combinations. The postings page writes here when you save a view,
   # and you can equally edit them by hand - same file, same source of truth.

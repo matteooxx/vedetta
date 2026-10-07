@@ -158,6 +158,30 @@ CREATE TABLE IF NOT EXISTS triage_event (
 );
 CREATE INDEX IF NOT EXISTS triage_event_posting ON triage_event(posting_id, id);
 
+-- What the job mailbox suggested. Stored as a derived observation, never as the
+-- message: sender, subject, date, classification and the phrase that decided it. No
+-- bodies. `accepted` stays 0 until a human says so - an observation proposes a stage,
+-- it never moves one.
+CREATE TABLE IF NOT EXISTS mail_observation (
+  id               INTEGER PRIMARY KEY,
+  message_id       TEXT NOT NULL UNIQUE,
+  sender           TEXT,
+  subject          TEXT,
+  received_at      TEXT,
+  kind             TEXT NOT NULL,
+  suggested_stage  TEXT,
+  evidence         TEXT,
+  from_ats         INTEGER NOT NULL DEFAULT 0,
+  employer_guess   TEXT,
+  posting_id       INTEGER REFERENCES posting(id) ON DELETE SET NULL,
+  match_confidence REAL,
+  seen_at          TEXT NOT NULL,
+  accepted         INTEGER NOT NULL DEFAULT 0,
+  dismissed        INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS mail_observation_open
+  ON mail_observation(accepted, dismissed, received_at);
+
 CREATE TABLE IF NOT EXISTS tracker_entry (
   id            INTEGER PRIMARY KEY,
   source_file   TEXT NOT NULL,

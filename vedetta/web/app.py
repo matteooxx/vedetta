@@ -21,6 +21,7 @@ from .. import config as config_mod
 from .. import configstore
 from .. import facets
 from .. import insights as insights_mod
+from .. import mailbox as mailbox_mod
 from .. import triage as triage_mod
 from .. import db as db_mod
 from .. import run as run_mod
@@ -78,6 +79,23 @@ def create_app() -> Flask:
 
     def load_config():
         return config_mod.load(ROOT, str(CONFIG_DIR))
+
+    @app.context_processor
+    def nav_counts():
+        """Pending mail observations, shown in the navigation.
+
+        A proposal nobody looks at is the same as no proposal, so the count follows
+        the reader around rather than waiting on its own page.
+        """
+        try:
+            cfg = config_mod.load(ROOT, str(CONFIG_DIR))
+            conn = db_mod.connect(cfg.db_path)
+            pending = conn.execute(
+                "SELECT count(*) FROM mail_observation WHERE accepted=0").fetchone()[0]
+            conn.close()
+        except Exception:
+            pending = 0
+        return {"mail_pending": pending}
 
     def open_db(cfg):
         return db_mod.connect(cfg.db_path)
@@ -359,6 +377,63 @@ def create_app() -> Flask:
         data["in_flight"] = triage_mod.in_flight(conn)
         conn.close()
         return render_template("insights.html", data=data, weeks=weeks)
+
+    @app.route("/mail")
+    def mail_review():
+        """Outcomes the mailbox suggested, waiting for you.
+
+        Nothing on this page has changed anything. Each row is a proposal with the
+        phrase that produced it, so you can see why it thinks what it thinks.
+        """
+        cfg = load_config()
+        conn = open_db(cfg)
+        rows = mailbox_mod.pending(conn)
+        config = mailbox_mod.MailboxConfig.from_env(cfg.settings.get("mailbox"))
+        conn.close()
+        return render_template("mail.html", observations=rows,
+                               configured=config.configured,
+                               stages=triage_mod.STAGES)
+
+    @app.post("/mail/<int:observation_id>/accept")
+    def mail_accept(observation_id: int):
+        """Apply a proposed stage, because a human said so.
+
+        The stage can be overridden here: the proposal is a starting point, and a
+        rule reading a subject line is right often rather than always.
+        """
+        cfg = load_config()
+        conn = open_db(cfg)
+        row = conn.execute("SELECT * FROM mail_observation WHERE id=?",
+                           (observation_id,)).fetchone()
+        if row is None:
+            conn.close()
+            abort(404)
+        stage = request.form.get("stage") or row["suggested_stage"]
+        if row["posting_id"] and stage and triage_mod.is_valid(stage):
+            triage_mod.set_stage(conn, row["posting_id"], stage,
+                                 note=f"from mail: {row['subject'][:120]}")
+            flash(f"Set that posting to “{triage_mod.label_of(stage)}”.", "ok")
+        elif not row["posting_id"]:
+            flash("Nothing to apply it to: this message was not matched to a posting. "
+                  "Marked as read anyway.", "warn")
+        conn.execute("UPDATE mail_observation SET accepted=1 WHERE id=?",
+                     (observation_id,))
+        conn.commit()
+        conn.close()
+        return redirect(url_for("mail_review"))
+
+    @app.post("/mail/<int:observation_id>/dismiss")
+    def mail_dismiss(observation_id: int):
+        cfg = load_config()
+        conn = open_db(cfg)
+        conn.execute(
+            "UPDATE mail_observation SET accepted=1, dismissed=1 WHERE id=?",
+            (observation_id,))
+        conn.commit()
+        conn.close()
+        flash("Dismissed. The observation is kept, so the same message is not "
+              "proposed again.", "ok")
+        return redirect(url_for("mail_review"))
 
     @app.route("/health")
     def health():

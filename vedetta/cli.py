@@ -13,6 +13,7 @@ import sys
 from . import config as config_mod
 from . import db as db_mod
 from . import run as run_mod
+from . import mailbox as mailbox_mod
 from .digest import mail, render
 from .runlock import RunInProgress, acquire
 
@@ -98,6 +99,41 @@ def cmd_relabel(args) -> int:
     return 0
 
 
+def cmd_mail(args) -> int:
+    """Read the job mailbox and record what looks like an application outcome.
+
+    Read-only throughout, and nothing it finds changes a triage stage: the
+    observations wait for a human in the interface.
+    """
+    cfg = _load(args)
+    config = mailbox_mod.MailboxConfig.from_env(cfg.settings.get("mailbox"))
+    if not config.configured:
+        print("mailbox not configured: set VEDETTA_SMTP_USER and "
+              "VEDETTA_SMTP_PASSWORD (one Gmail app password serves both sending "
+              "and reading)", file=sys.stderr)
+        return 2
+    conn = db_mod.connect(cfg.db_path)
+    try:
+        observations = mailbox_mod.fetch(config)
+    except mailbox_mod.MailboxNotConfigured as exc:
+        print(f"mailbox not configured ({exc})", file=sys.stderr)
+        conn.close()
+        return 2
+    except Exception as exc:
+        print(f"mailbox read failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+        conn.close()
+        return 1
+    stats = mailbox_mod.attach(conn, observations)
+    conn.close()
+    print(f"read {len(observations)} message(s) that look like an outcome")
+    print(f"  new          : {stats['stored']}")
+    print(f"  matched      : {stats['matched']}")
+    print(f"  unmatched    : {stats['unmatched']} (shown as unmatched, not guessed)")
+    print(f"  already known: {stats['already']}")
+    print("Nothing was marked read, and no triage stage was changed.")
+    return 0
+
+
 def cmd_check(args) -> int:
     cfg = _load(args)
     status = db_mod.check(cfg.db_path)
@@ -121,6 +157,8 @@ def main(argv=None) -> int:
 
     sub.add_parser("relabel", help="re-apply rules and profile to stored postings"
                    ).set_defaults(func=cmd_relabel)
+    sub.add_parser("mail", help="read the job mailbox for application outcomes"
+                   ).set_defaults(func=cmd_mail)
     sub.add_parser("check").set_defaults(func=cmd_check)
 
     args = parser.parse_args(argv)
