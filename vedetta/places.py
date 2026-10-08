@@ -29,6 +29,7 @@ project is organised against.
 from __future__ import annotations
 
 import re
+import unicodedata
 
 # A spaced dash separates places ("Ireland - Dublin Hub"); an unspaced one is part of
 # a name ("Saint-Denis"), so only the spaced form splits.
@@ -85,8 +86,105 @@ ALIASES = {
     "eu": "European Union",
 }
 
+# The same countries in the languages the watched boards actually answer in.
+#
+# This is not a nicety. Cisco's careers site served its sitemap in French-Canadian,
+# so postings arrived as "Krakow, Pologne" and "Austin, Texas, Etats-Unis
+# d'Amerique". City names survive a change of language, which is why the Polish
+# postings still matched the location rules - country names do not, so a posting in
+# Texas read as "location unclear" and was shown rather than guessed away. That is
+# the safe direction to fail in and it fills the digest with roles on the wrong
+# continent.
+#
+# A source answering in another language is not a fault to be fixed at the source,
+# either: a reader in France watching French employers will meet French locations as
+# the normal case. The lookup is accent-folded (see `_fold`), so an entry here is
+# written without accents and matches either spelling.
+ALIASES.update({
+    # France
+    "allemagne": "Germany", "autriche": "Austria", "belgique": "Belgium",
+    "danemark": "Denmark", "espagne": "Spain", "etats unis": "United States",
+    "etats unis d amerique": "United States", "finlande": "Finland",
+    "grece": "Greece", "hongrie": "Hungary", "inde": "India", "irlande": "Ireland",
+    "italie": "Italy", "japon": "Japan", "norvege": "Norway",
+    "pays bas": "Netherlands", "pologne": "Poland", "roumanie": "Romania",
+    "royaume uni": "United Kingdom", "suede": "Sweden", "suisse": "Switzerland",
+    "tchequie": "Czechia", "republique tcheque": "Czechia", "bresil": "Brazil",
+    "mexique": "Mexico", "chine": "China", "coree du sud": "South Korea",
+    "afrique du sud": "South Africa", "emirats arabes unis": "United Arab Emirates",
+    "singapour": "Singapore", "australie": "Australia",
+    "nouvelle zelande": "New Zealand", "israel": "Israel", "pologne pl": "Poland",
+    # Germany
+    "deutschland de": "Germany", "frankreich": "France", "spanien": "Spain",
+    "italien": "Italy", "irland": "Ireland", "niederlande": "Netherlands",
+    "polen": "Poland", "schweden": "Sweden", "schweiz": "Switzerland",
+    "osterreich": "Austria", "danemark de": "Denmark", "daenemark": "Denmark",
+    "finnland": "Finland", "norwegen": "Norway", "tschechien": "Czechia",
+    "rumanien": "Romania", "ungarn": "Hungary", "griechenland": "Greece",
+    "vereinigtes konigreich": "United Kingdom",
+    "vereinigte staaten": "United States", "indien": "India",
+    "grossbritannien": "United Kingdom", "belgien": "Belgium",
+    "portugal de": "Portugal", "japan": "Japan",
+    # Spain and Portugal
+    "alemania": "Germany", "francia": "France", "irlanda": "Ireland",
+    "paises bajos": "Netherlands", "polonia": "Poland", "suecia": "Sweden",
+    "suiza": "Switzerland", "dinamarca": "Denmark", "noruega": "Norway",
+    "finlandia": "Finland", "republica checa": "Czechia", "rumania": "Romania",
+    "hungria": "Hungary", "grecia": "Greece", "reino unido": "United Kingdom",
+    "estados unidos": "United States", "paises baixos": "Netherlands",
+    "polonia pt": "Poland", "alemanha": "Germany", "franca": "France",
+    "irlanda pt": "Ireland", "suecia pt": "Sweden", "suica": "Switzerland",
+    # Italy
+    "germania": "Germany", "spagna": "Spain", "olanda": "Netherlands",
+    "paesi bassi": "Netherlands", "svezia": "Sweden", "svizzera": "Switzerland",
+    "danimarca": "Denmark", "norvegia": "Norway", "finlandia it": "Finland",
+    "repubblica ceca": "Czechia", "romania it": "Romania", "ungheria": "Hungary",
+    "regno unito": "United Kingdom", "stati uniti": "United States",
+    "stati uniti d america": "United States", "irlanda it": "Ireland",
+    # Netherlands
+    "duitsland": "Germany", "frankrijk": "France", "spanje": "Spain",
+    "ierland": "Ireland", "polen nl": "Poland", "zweden": "Sweden",
+    "zwitserland": "Switzerland", "denemarken": "Denmark",
+    "noorwegen": "Norway", "verenigd koninkrijk": "United Kingdom",
+    "verenigde staten": "United States", "belgie": "Belgium",
+    "nederland": "Netherlands", "oostenrijk": "Austria", "italie": "Italy",
+    # Poland
+    "polska": "Poland", "niemcy": "Germany", "francja": "France",
+    "hiszpania": "Spain", "irlandia": "Ireland", "holandia": "Netherlands",
+    "szwecja": "Sweden", "szwajcaria": "Switzerland", "dania": "Denmark",
+    "norwegia": "Norway", "czechy": "Czechia", "wegry": "Hungary",
+    "wielka brytania": "United Kingdom",
+    "stany zjednoczone": "United States", "wlochy": "Italy",
+    "wloch": "Italy", "austria pl": "Austria",
+})
+
 # Cities worth keeping even when they arrive glued to a country code, e.g. "GB-London".
 GLUED = re.compile(r"^([A-Z]{2})[-–](.+)$")
+
+
+_UNDECOMPOSABLE = str.maketrans({
+    "ł": "l", "Ł": "L", "ø": "o", "Ø": "O", "đ": "d", "Đ": "D",
+    "ß": "ss", "æ": "ae", "Æ": "AE", "œ": "oe", "Œ": "OE", "þ": "th",
+    "ð": "d", "ı": "i", "ʼ": "'",
+})
+
+
+def _fold(text: str) -> str:
+    """Strip accents for lookup purposes only.
+
+    The key built below removes everything outside a-z, so without this
+    "Etats-Unis d'Amerique" arrives as "tats unis d am rique" and matches nothing -
+    an accented country name was unreachable however many aliases were listed. The
+    display name is taken from the original text, so folding never reaches what the
+    reader sees: "Zurich" is matched, "Zürich" is shown.
+
+    A handful of letters do not decompose at all under NFKD - Polish ł, Nordic ø and
+    å-as-aa, German ß - so they are translated first. Without that, "Włochy" (Italy,
+    in Polish) reduces to "w ochy" and no alias can reach it.
+    """
+    text = text.translate(_UNDECOMPOSABLE)
+    return "".join(c for c in unicodedata.normalize("NFKD", text)
+                   if not unicodedata.combining(c))
 
 
 def _clean(fragment: str) -> str:
@@ -100,7 +198,7 @@ def _canonical(fragment: str) -> str | None:
     text = _clean(fragment)
     if not text:
         return None
-    lowered = re.sub(r"[^a-z\s]", " ", text.lower())
+    lowered = re.sub(r"[^a-z\s]", " ", _fold(text).lower())
     lowered = WS.sub(" ", lowered).strip()
     if not lowered or lowered in NOISE:
         return None
@@ -132,7 +230,7 @@ def _places_in(fragment: str) -> list[str]:
     if not text:
         return []
 
-    whole = WS.sub(" ", re.sub(r"[^a-z\s]", " ", text.lower())).strip()
+    whole = WS.sub(" ", re.sub(r"[^a-z\s]", " ", _fold(text).lower())).strip()
     if whole in ALIASES:
         return [ALIASES[whole]]
     if not whole or whole in NOISE or re.fullmatch(r"\d+\s*\w*", whole):
@@ -143,7 +241,7 @@ def _places_in(fragment: str) -> list[str]:
     out: list[str] = []
     leftovers: list[str] = []
     for token in text.split():
-        key = re.sub(r"[^a-z]", "", token.lower())
+        key = re.sub(r"[^a-z]", "", _fold(token).lower())
         if not key:
             continue
         if key in ALIASES:

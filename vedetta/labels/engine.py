@@ -13,7 +13,11 @@ Three rule shapes:
 
 ``extract`` + ``compare``
     Pull a number out of the text and compare it against a profile field, for
-    seniority thresholds.
+    seniority thresholds. ``extract`` takes one pattern or a list of them, each with
+    exactly one capturing group around the number. ``compare.ignore_above`` discards
+    a figure too large to be a real requirement before the comparison, because the
+    largest match is the one used and a company's "40 years of innovation" otherwise
+    outranks the "3+ years of experience" beside it.
 
 ``field``
     Which part of the posting the rule reads: ``title``, ``body`` or ``all``
@@ -71,7 +75,10 @@ class RuleEngine:
                     "raw": rule,
                     "when": _patterns(rule.get("when")),
                     "unless": _patterns(rule.get("unless")),
-                    "extract": re.compile(rule["extract"]) if rule.get("extract") else None,
+                    # A list, like `when` and `unless`, because the two orders an
+                    # advert states a requirement in ("5+ years of experience" and
+                    # "experience: 5+ years") cannot share one capture group.
+                    "extract": _patterns(rule["extract"]) if rule.get("extract") else None,
                 }
             )
 
@@ -118,7 +125,9 @@ class RuleEngine:
         )
 
     def _evaluate_numeric(self, item: dict, rule: dict, text: str) -> Label | None:
-        found = [int(m) for m in item["extract"].findall(text) if m.isdigit()]
+        found: list[int] = []
+        for pattern in item["extract"]:
+            found.extend(int(m) for m in pattern.findall(text) if m.isdigit())
         if not found:
             return None
         compare = rule.get("compare") or {}
@@ -126,6 +135,25 @@ class RuleEngine:
         limit = self.profile.get(field) if field else compare.get("value")
         if limit is None:
             return None
+
+        # An implausible figure is dropped rather than compared, and `max` below is
+        # why it has to be. Several Cisco adverts produced "asks for more years than
+        # you have: 40" - a company founded in 1984 writing "40 years of innovation"
+        # in its own boilerplate. No advert asks for forty years of anything, and
+        # taking the largest match means one stray number outranks the real
+        # requirement sitting next to it.
+        #
+        # A ceiling cannot be the only defence, because it only catches the absurd:
+        # "15 years of partnership" would still read as a requirement. The pattern
+        # has to insist on the word experience, which it now does. This is the second
+        # line, kept because every pattern here has eventually been wrong about
+        # something.
+        ceiling = compare.get("ignore_above")
+        if ceiling is not None:
+            plausible = [v for v in found if v <= ceiling]
+            if not plausible:
+                return None
+            found = plausible
         value = max(found)
         op = compare.get("operator", "gt")
         hit = (value > limit) if op == "gt" else (value < limit) if op == "lt" else (value == limit)

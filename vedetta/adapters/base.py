@@ -54,6 +54,38 @@ class Adapter:
 
     def __init__(self, timeout: float = 25.0):
         self.timeout = timeout
+        # Things that went oddly without going wrong. An adapter appends to this and
+        # the caller records it against the poll, which is how a listing that was
+        # demonstrably short gets reported without being called a failure.
+        #
+        # The alternative was to raise, and that is what the Workday adapter used to
+        # do for a board one posting shorter than its own declared total: a large
+        # board that changed while being read. The postings were thrown away over it
+        # and the digest said "1 source failing", which is how a reader learns to
+        # stop reading the failures.
+        self.notes: list[str] = []
+        # Whether the listing itself is in doubt. Separate from the notes, and the
+        # distinction is load-bearing: the caller refuses to close any posting for a
+        # source whose listing was incomplete, because a posting absent from a short
+        # listing may still be open.
+        #
+        # The first version had only the notes, and inferred incompleteness from any
+        # note existing. The sitemap adapter then reported, correctly and on every
+        # run, that it had chosen one of two translated sitemaps - a complete listing
+        # with something worth saying about it - and Cisco would never have closed a
+        # posting again.
+        self.incomplete = False
+
+    def note(self, message: str, incomplete: bool = False) -> None:
+        """Record something that went oddly without going wrong.
+
+        `incomplete=True` also says the listing cannot be trusted to be the whole
+        board, which is a statement about what may be concluded from an absence, not
+        about severity.
+        """
+        self.notes.append(message)
+        if incomplete:
+            self.incomplete = True
 
     def client(self) -> httpx.Client:
         return httpx.Client(

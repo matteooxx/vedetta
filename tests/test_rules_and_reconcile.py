@@ -120,3 +120,30 @@ def test_normalisation_does_not_collapse_different_roles():
 def test_empty_input_is_safe():
     assert normalise(None) == ""
     assert normalise("") == ""
+
+
+def test_an_exclusion_reason_is_not_printed_twice():
+    """Every excluded posting read "matched none of your target role clusters;
+    matched none of your target role clusters", because blocked_by recomputed a
+    label the labeller had already added. The reason line exists to be read."""
+    from vedetta.profile import Profile
+    profile = Profile.from_dict({
+        "tracks": {"require_match": True},
+        "exclude_if": ["no-target-track"],
+    })
+    labels = [profile.track_label([])]
+    blocking = profile.blocked_by(labels)
+    assert [l.rule_id for l in blocking] == ["no-target-track"]
+    assert "; ".join(l.explain for l in blocking) == (
+        "matched none of your target role clusters")
+
+
+def test_the_reason_still_appears_when_the_labeller_did_not_add_it():
+    """blocked_by may be handed a list that never went through the labeller, so the
+    recompute has to stay."""
+    from vedetta.profile import Profile
+    profile = Profile.from_dict({
+        "tracks": {"require_match": True},
+        "exclude_if": ["no-target-track"],
+    })
+    assert [l.rule_id for l in profile.blocked_by([])] == ["no-target-track"]

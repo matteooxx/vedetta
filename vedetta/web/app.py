@@ -112,13 +112,14 @@ def create_app() -> Flask:
         polls = []
         if last:
             polls = conn.execute(
-                """SELECT p.outcome, p.item_count, p.error, s.platform,
+                """SELECT p.outcome, p.item_count, p.error, p.note, s.platform,
                           e.display_name AS employer
                    FROM source_poll p
                    JOIN source s ON s.id = p.source_id
                    JOIN employer e ON e.id = s.employer_id
                    WHERE p.run_id = ?
-                   ORDER BY (p.outcome='error') DESC, e.display_name""",
+                   ORDER BY (p.outcome='error') DESC,
+                            (p.outcome='partial') DESC, e.display_name""",
                 (last["id"],),
             ).fetchall()
         counts = {

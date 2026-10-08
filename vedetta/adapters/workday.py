@@ -138,8 +138,25 @@ class WorkdayAdapter(Adapter):
                 break
             time.sleep(POLITE_DELAY)
         if total is not None and len(collected) < total:
+            short = total - len(collected)
+            if short <= _tolerable(total):
+                # A large board paginated twenty at a time takes a minute to walk,
+                # and a posting taken down in that minute leaves the count one
+                # short. That is a board behaving normally, so the postings are
+                # kept and the shortfall is reported as a note rather than thrown
+                # away as a failure - but the caller records the poll as `partial`,
+                # which keeps it out of the set of healthy sources, so nothing gets
+                # closed on the strength of an incomplete listing.
+                self.note(
+                    f"listing was {short} short of its declared {total} postings "
+                    f"- consistent with the board changing while it was being "
+                    f"read, so the {len(collected)} returned are used and nothing "
+                    f"is closed from this poll",
+                    incomplete=True)
+                return collected
             # Said out loud rather than returned quietly: a partial board looks
-            # exactly like an employer that has fewer openings than it does.
+            # exactly like an employer that has fewer openings than it does. This
+            # was 40 of 127 when it was found.
             raise AdapterError(
                 f"listing stopped at {len(collected)} of {total} postings - "
                 f"pagination is incomplete, which is not the same as a small board")
@@ -180,6 +197,21 @@ class WorkdayAdapter(Adapter):
         if info.get("remoteType"):
             places.append("Remote")
         return text, "; ".join(dict.fromkeys(places)) or None
+
+
+def _tolerable(total: int) -> int:
+    """How much shorter than its own count a board may be before it is a fault.
+
+    Two postings, or one percent, whichever is larger. The shape matters more than
+    the numbers: a handful of removals during a walk through hundreds of postings is
+    the board being busy, while a shortfall that scales with the board is pagination
+    breaking. The real fault this guard was built for was 40 of 127 - a third of the
+    board missing - and it still fails that, by a wide margin.
+
+    Deliberately not a percentage alone: on a 30-posting board one percent rounds to
+    nothing, and one removal would be a failure again.
+    """
+    return max(2, total // 100)
 
 
 def _public_base(endpoint: str) -> str:

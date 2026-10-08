@@ -40,9 +40,12 @@ find out whether it ran and what it saw.</p>
   <tr>
     <td>{{ p.employer }}</td>
     <td class="mono">{{ p.platform }}</td>
-    <td class="{{ 'blocking' if p.outcome=='error' else ('warning' if p.outcome=='empty' else 'positive') }}">{{ p.outcome }}</td>
+    {# `partial` reads as a warning, not a failure: the source answered and its
+       postings are here. What it could not do is prove a posting has gone, so
+       nothing was closed for that employer on this run. #}
+    <td class="{{ 'blocking' if p.outcome=='error' else ('warning' if p.outcome in ('empty','partial') else 'positive') }}">{{ 'short' if p.outcome=='partial' else p.outcome }}</td>
     <td class="mono">{{ p.item_count if p.item_count is not none else '-' }}</td>
-    <td class="small muted">{{ p.error or '' }}</td>
+    <td class="small muted">{{ p.error or p.note or '' }}</td>
   </tr>
   {% endfor %}
   </tbody>

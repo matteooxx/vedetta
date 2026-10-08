@@ -98,7 +98,12 @@ def known_keys(conn, source_id: int) -> set[str]:
 
 
 def poll(conn, run_id: int, source: dict, seeding: bool = False,
-         reporter=None) -> tuple[str, list]:
+         reporter=None) -> tuple[str, list, str | None]:
+    """Poll one source. Returns (outcome, items, note).
+
+    The note is the third element rather than a side effect because the digest has to
+    print it: a shortfall recorded only in the database is a shortfall nobody reads.
+    """
     platform = source["platform"]
     adapter_cls = ADAPTERS.get(platform)
     if adapter_cls is None:
@@ -112,7 +117,7 @@ def poll(conn, run_id: int, source: dict, seeding: bool = False,
             f"this build has no adapter for '{platform}' - the source is fine, the "
             f"running image is out of date (built with: "
             f"{', '.join(sorted(ADAPTERS))})")
-        return "error", []
+        return "error", [], None
 
     started = time.monotonic()
     try:
@@ -127,7 +132,8 @@ def poll(conn, run_id: int, source: dict, seeding: bool = False,
             def on_progress(done, total=None, what="postings"):
                 reporter.progress(employer, done, total, what)
 
-        items = adapter_cls().fetch(
+        adapter = adapter_cls()
+        items = adapter.fetch(
             source,
             known_keys=known_keys(conn, source["id"]),
             detail_budget=None if seeding else 150,
@@ -137,31 +143,51 @@ def poll(conn, run_id: int, source: dict, seeding: bool = False,
         _record_poll(conn, run_id, source["id"], "error", exc.http_status, None,
                      int((time.monotonic() - started) * 1000), str(exc))
         _set_health(conn, source["id"], "error")
-        return "error", []
+        return "error", [], None
     except Exception as exc:  # unexpected: still recorded, never swallowed
         _record_poll(conn, run_id, source["id"], "error", None, None,
                      int((time.monotonic() - started) * 1000),
                      f"{type(exc).__name__}: {exc}")
         _set_health(conn, source["id"], "error")
-        return "error", []
+        return "error", [], None
 
     duration = int((time.monotonic() - started) * 1000)
-    outcome = "ok" if items else "empty"
-    _record_poll(conn, run_id, source["id"], outcome, 200, len(items), duration, None)
-    _set_health(conn, source["id"], "ok" if items else "empty")
-    return outcome, items
+    # `partial` sits between ok and error: the platform answered and the postings are
+    # usable, but the listing was demonstrably incomplete. Both halves of that matter.
+    # It is not an error, because a failure notice that is usually nothing teaches the
+    # reader to skip failure notices. It is not ok either, because close_missing must
+    # not retire a posting that may be absent only because the listing was short.
+    note = "; ".join(adapter.notes) or None
+    # `partial` turns on whether the listing can be trusted to be the whole board,
+    # not on whether the adapter had something to say. A complete listing with a note
+    # on it is still `ok`: marking it partial would stop this source ever closing a
+    # posting, because close_missing treats partial as unhealthy - permanently, for a
+    # note that recurs every run.
+    if not items:
+        outcome = "empty"
+    elif adapter.incomplete:
+        outcome = "partial"
+    else:
+        outcome = "ok"
+    _record_poll(conn, run_id, source["id"], outcome, 200, len(items), duration,
+                 None, note=note)
+    _set_health(conn, source["id"], outcome)
+    if note and reporter is not None:
+        reporter.note(f"{source['employer_name']}: {note}")
+    return outcome, items, note
 
 
-def _record_poll(conn, run_id, source_id, outcome, status, count, duration, error):
+def _record_poll(conn, run_id, source_id, outcome, status, count, duration, error,
+                 note=None):
     conn.execute(
         """INSERT INTO source_poll (run_id, source_id, outcome, http_status,
-                item_count, duration_ms, error)
-           VALUES (?,?,?,?,?,?,?)
+                item_count, duration_ms, error, note)
+           VALUES (?,?,?,?,?,?,?,?)
            ON CONFLICT(run_id, source_id) DO UPDATE SET
              outcome=excluded.outcome, http_status=excluded.http_status,
              item_count=excluded.item_count, duration_ms=excluded.duration_ms,
-             error=excluded.error""",
-        (run_id, source_id, outcome, status, count, duration, error),
+             error=excluded.error, note=excluded.note""",
+        (run_id, source_id, outcome, status, count, duration, error, note),
     )
     conn.commit()
 
@@ -322,13 +348,19 @@ def close_missing(conn, run_id: int) -> int:
     A posting absent from one source while a sibling source still returns data is a
     source fault, not a closure. That distinction is the whole point of polling more
     than one route (ADR-0012), so it is enforced here rather than assumed.
+
+    `partial` counts as unhealthy here, exactly like `error`. A listing that came
+    back short is the one case where a posting can be absent and still open, and the
+    shortfall gives no way to tell which posting it was. Closing on it would retire
+    an opening that is still live - the expensive direction to be wrong in.
     """
     healthy_employers = [r[0] for r in conn.execute(
         """SELECT DISTINCT s.employer_id
            FROM source s JOIN source_poll p ON p.source_id = s.id AND p.run_id = ?
            WHERE s.verified_on IS NOT NULL
            GROUP BY s.employer_id
-           HAVING sum(CASE WHEN p.outcome = 'error' THEN 1 ELSE 0 END) = 0
+           HAVING sum(CASE WHEN p.outcome IN ('error','partial')
+                           THEN 1 ELSE 0 END) = 0
               AND sum(CASE WHEN p.outcome = 'ok' THEN 1 ELSE 0 END) > 0""",
         (run_id,),
     ).fetchall()]
@@ -408,12 +440,12 @@ def execute_in(conn, config, run_id: int, reporter=None,
         if reporter is not None:
             reporter.source(source["employer_name"], source["platform"],
                             index, len(sources))
-        outcome, items = poll(conn, run_id, source,
-                              seeding=source["id"] in seeding_sources,
-                              reporter=reporter)
+        outcome, items, note = poll(conn, run_id, source,
+                                    seeding=source["id"] in seeding_sources,
+                                    reporter=reporter)
         report["polls"].append({
             "employer": source["employer_name"], "platform": source["platform"],
-            "outcome": outcome, "count": len(items),
+            "outcome": outcome, "count": len(items), "note": note,
             "seeding": source["id"] in seeding_sources,
         })
         for item in items:

@@ -42,8 +42,29 @@ rules:
     kind: gate
     severity: warning
     explain: "asks for more years than you have:"
-    extract: '(?i)(\d{1,2})\s*\+?\s*(?:-\s*\d{1,2}\s*)?years?\b'
-    compare: { operator: gt, field: max_years_experience }
+    # A number next to the word "years" is not a requirement. Several Cisco adverts
+    # came out labelled "asks for more years than you have: 40" - a company founded
+    # in 1984 writing "40 years of innovation" into its own boilerplate. The figure
+    # used is the largest match, so one stray number outranks the real requirement
+    # sitting beside it.
+    #
+    # Both patterns insist on the word experience, in either order, because adverts
+    # state it both ways: "5+ years of experience" and "Experience: 5+ years". One
+    # capturing group each, around the number.
+    #
+    # The gap between the two halves allows no digit and no sentence end. Without
+    # that, "a 30 year old company seeking 6 years experience in Python" reached the
+    # word experience from the 30 and reported 30 - and because matches do not
+    # overlap, it swallowed the 6 that was the real requirement. A rule can be wrong
+    # by matching too much as easily as by matching too little.
+    field: body
+    extract:
+      - '(?i)\b(\d{1,2})\s*\+?\s*(?:(?:to|-|–)\s*\d{1,2}\s*)?years?\b(?!\s+old\b)[^.;\n\d]{0,40}?\bexperience\b'
+      - '(?i)\bexperience\b[^.;\n\d]{0,25}?\b(\d{1,2})\s*\+?\s*(?:(?:to|-|–)\s*\d{1,2}\s*)?years?\b'
+    # Second line of defence, for the next way a pattern turns out to be wrong: no
+    # advert asks for more than this, so a larger figure is read as something else on
+    # the page and dropped rather than compared.
+    compare: { operator: gt, field: max_years_experience, ignore_above: 25 }
 
   - id: visa-not-sponsored
     kind: gate

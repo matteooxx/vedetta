@@ -4,6 +4,7 @@
     vedetta run           poll, reconcile, label, and send the digest
     vedetta run --stdout  the same, printing instead of sending
     vedetta check         read-only integrity report
+    vedetta dedupe        postings stored twice because a source answered twice
     vedetta digest --run N  rebuild and queue a run's digest that never went out
 """
 from __future__ import annotations
@@ -13,6 +14,7 @@ import sys
 
 from . import config as config_mod
 from . import db as db_mod
+from . import dedupe as dedupe_mod
 from . import run as run_mod
 from .digest import dispatch as dispatch_mod
 from .digest import outbox, rebuild
@@ -157,6 +159,58 @@ def cmd_digest(args) -> int:
     return 0
 
 
+def cmd_dedupe(args) -> int:
+    """Fold postings stored twice because one source answered in two languages.
+
+    Reports by default and changes nothing without --apply, because which of two
+    rows is the real one is a guess, and this one is made from the URL rather than
+    from the advert.
+    """
+    cfg = _load(args)
+    conn = db_mod.connect(cfg.db_path)
+    pairs = dedupe_mod.find(conn)
+    if not pairs:
+        print("no postings differ only by the language of their URL")
+        conn.close()
+        return 0
+
+    employers: dict[str, int] = {}
+    for pair in pairs:
+        employers[pair.employer] = employers.get(pair.employer, 0) + 1
+    print(f"{len(pairs)} posting(s) stored twice, by employer:")
+    for employer, count in sorted(employers.items(), key=lambda kv: -kv[1]):
+        print(f"  {count:>5}  {employer}")
+    print()
+    for pair in pairs[:args.show]:
+        print(f"  {pair.employer} - {pair.title}  ({pair.locales})")
+        print(f"      keep  #{pair.keep_id}  {pair.keep_url}")
+        print(f"      fold  #{pair.drop_id}  {pair.drop_url}")
+    if len(pairs) > args.show:
+        print(f"  ... and {len(pairs) - args.show} more "
+              f"(--show N to list more)")
+
+    if not args.apply:
+        print()
+        print("Nothing changed. Re-run with --apply to link each duplicate to its")
+        print("original and close it. Nothing is deleted: labels, triage decisions")
+        print("and history stay where they are.")
+        conn.close()
+        return 0
+
+    latest = conn.execute("SELECT max(id) FROM run").fetchone()[0]
+    if latest is None:
+        print("no run recorded yet, so there is nothing to date a closure to",
+              file=sys.stderr)
+        conn.close()
+        return 1
+    count = dedupe_mod.apply(conn, pairs, latest)
+    print()
+    print(f"{count} posting(s) folded into their originals and closed against "
+          f"run {latest}.")
+    conn.close()
+    return 0
+
+
 def cmd_relabel(args) -> int:
     """Re-apply the current rules and profile to postings already stored.
 
@@ -250,6 +304,15 @@ def main(argv=None) -> int:
     digest_parser.add_argument("--stdout", action="store_true",
                                help="print it instead of queueing it")
     digest_parser.set_defaults(func=cmd_digest)
+    dedupe_parser = sub.add_parser(
+        "dedupe", help="postings stored twice because a source answered in two "
+                       "languages")
+    dedupe_parser.add_argument("--apply", action="store_true",
+                               help="make the change (reports only without it)")
+    dedupe_parser.add_argument("--show", type=int, default=10, metavar="N",
+                               help="how many pairs to list (default 10)")
+    dedupe_parser.set_defaults(func=cmd_dedupe)
+
     sub.add_parser("check").set_defaults(func=cmd_check)
 
     args = parser.parse_args(argv)

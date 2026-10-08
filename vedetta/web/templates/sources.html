@@ -35,7 +35,7 @@ you real titles, and you decide.
         <span class="tag warning">not confirmed &mdash; never polled</span>
       {% endif %}
     </td>
-    <td class="small {{ 'blocking' if s.health=='error' else ('warning' if s.health=='empty' else ('positive' if s.health=='ok' else 'info')) }}">{{ s.health }}</td>
+    <td class="small {{ 'blocking' if s.health=='error' else ('warning' if s.health in ('empty','partial') else ('positive' if s.health=='ok' else 'info')) }}">{{ 'short' if s.health=='partial' else s.health }}</td>
     <td>
       <form class="inline" method="post" action="{{ url_for('sample', source_id=s.id) }}">
         <button class="ghost" type="submit">Sample</button>

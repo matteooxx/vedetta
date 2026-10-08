@@ -132,10 +132,23 @@ def render_text(report: dict, config=None) -> str:
     ok = [p for p in report["polls"] if p["outcome"] == "ok"]
     empty = [p for p in report["polls"] if p["outcome"] == "empty"]
     bad = [p for p in report["polls"] if p["outcome"] == "error"]
-    lines.append(f"{len(ok)} ok, {len(empty)} returned nothing, {len(bad)} failed, "
-                 f"{report['sources']} configured")
+    short = [p for p in report["polls"] if p["outcome"] == "partial"]
+    counts = [f"{len(ok)} ok", f"{len(empty)} returned nothing"]
+    if short:
+        counts.append(f"{len(short)} short")
+    counts.append(f"{len(bad)} failed")
+    lines.append(", ".join(counts) + f", {report['sources']} configured")
     for poll in bad:
         lines.append(f"  FAILED  {poll['employer']} ({poll['platform']})")
+    # Its own word, not FAILED. A listing that came back short answered, and its
+    # postings are in this digest; what it cannot do is prove a posting has gone, so
+    # nothing was closed for that employer. Reported here and not in the subject
+    # line: a large board loses a posting mid-walk often enough that putting it in
+    # the subject would teach the reader to ignore the subject.
+    for poll in short:
+        lines.append(f"  SHORT   {poll['employer']} ({poll['platform']})")
+        if poll.get("note"):
+            lines.append(f"          {poll['note']}")
     for poll in empty:
         lines.append(f"  EMPTY   {poll['employer']} ({poll['platform']}) - "
                      "a board with no postings, or a wrong identifier")

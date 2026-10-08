@@ -21,6 +21,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from . import places as places_mod
 from .labels.engine import Label
 
 SPLIT = re.compile(r"[;/|]|,\s*(?=[A-Z])|\s+(?:and|or)\s+", re.I)
@@ -111,10 +112,30 @@ class Profile:
         return best, matched
 
     def _judge_fragment(self, fragment: str) -> tuple[str | None, str | None]:
+        """Judge one fragment, by its text and by the places in it.
+
+        The text alone was not enough. A profile that excludes "United States" was
+        matching "Austin, Texas, United States" and missing "Denver, Colorado, USA"
+        and "New York, US, New York" entirely - 26 postings in a country the reader
+        cannot work in sat in the workable list, because neither "US" nor "USA"
+        contains the string the profile had written.
+
+        So the fragment is also run through the place extractor, which already
+        collapses us, usa, U.S.A. and Etats-Unis onto one name, and the canonical
+        names are judged too. The reader keeps writing the country once, in one
+        spelling, and every spelling the platforms use reaches it.
+        """
         lowered = fragment.lower()
+        candidates = [lowered]
+        places, _, _ = places_mod.extract(fragment)
+        candidates.extend(place.lower() for place in places)
         for bucket in ORDER:
             for needle in getattr(self, bucket):
-                if needle.lower() in lowered:
+                target = needle.lower()
+                # Whole-value match on a canonical place name, substring match on
+                # the raw text: "Ireland" must not be found inside "Irelandia", but
+                # "Dublin" does have to be found inside "Dublin Hub".
+                if target in lowered or any(target == c for c in candidates[1:]):
                     return bucket, needle
         return None, None
 
@@ -213,8 +234,16 @@ class Profile:
             return []
         wanted = set(self.exclude_if)
         out = [l for l in labels if l.rule_id in wanted]
+        # Recomputed here because this may be called with a label list that was never
+        # passed through the labeller - but only added if it is not already there.
+        # It was added unconditionally, and since label_posting does pass it through,
+        # every excluded posting read "matched none of your target role clusters;
+        # matched none of your target role clusters" in the digest and in the
+        # interface. Cosmetic, and it undermines the one thing the reason line is
+        # for: being read.
+        seen = {l.rule_id for l in out}
         extra = self.track_label(labels)
-        if extra is not None and extra.rule_id in wanted:
+        if extra is not None and extra.rule_id in wanted and extra.rule_id not in seen:
             out.append(extra)
         return out
 

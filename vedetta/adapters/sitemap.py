@@ -37,6 +37,11 @@ LD_BLOCK = re.compile(
     r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', re.S | re.I)
 SITEMAP_LINE = re.compile(r"(?im)^\s*sitemap:\s*(\S+)")
 
+# A path segment that is a language or a locale code: en, fr, en-gb, pt_BR. Used to
+# recognise two sitemaps as translations of each other, never to rewrite a URL that
+# gets fetched.
+_LOCALE_CODE = re.compile(r"^[a-z]{2}([-_][a-z]{2})?$", re.I)
+
 # Guard rails. A careers sitemap index can fan out a long way, and this runs daily
 # against someone else's server.
 MAX_SITEMAP_FETCHES = 12
@@ -68,11 +73,20 @@ class SitemapAdapter(Adapter):
                 "a sitemap source needs job_url_pattern: no global pattern separates "
                 "job pages from content pages correctly on every site")
         exclude = re.compile(source["job_url_exclude"]) if source.get("job_url_exclude") else None
+        # Which sitemaps to follow, in the same shape as the job-URL filters above
+        # and for the same reason: no single rule is right for every site.
+        sitemap_include = (re.compile(source["sitemap_include"])
+                           if source.get("sitemap_include") else None)
+        sitemap_exclude = (re.compile(source["sitemap_exclude"])
+                           if source.get("sitemap_exclude") else None)
+        language = (source.get("language") or "en").lower()
 
         with self.client() as client:
             if progress is not None:
                 progress(0, None, "reading the sitemap")
-            urls = self._collect(client, host_url, origin)
+            urls = self._collect(client, host_url, origin,
+                                 include=sitemap_include, exclude=sitemap_exclude,
+                                 language=language)
             job_urls = [u for u in urls
                         if include.search(u) and not (exclude and exclude.search(u))]
             if not job_urls:
@@ -112,7 +126,8 @@ class SitemapAdapter(Adapter):
         host = identifier if "://" in identifier else f"https://{identifier}"
         return urljoin(host, "/sitemap.xml")
 
-    def _collect(self, client: httpx.Client, host_url: str, origin: str) -> list[str]:
+    def _collect(self, client: httpx.Client, host_url: str, origin: str,
+                 include=None, exclude=None, language: str = "en") -> list[str]:
         """robots.txt first, as a matter of manners, then walk what it declares."""
         candidates: list[str] = []
         try:
@@ -124,6 +139,14 @@ class SitemapAdapter(Adapter):
         if host_url not in candidates:
             candidates.insert(0, host_url)
 
+        if include is not None:
+            candidates = [c for c in candidates
+                          if include.search(c) or c == host_url]
+        if exclude is not None:
+            candidates = [c for c in candidates
+                          if not exclude.search(c) or c == host_url]
+        candidates = self._one_per_language(candidates, language, prefer=host_url)
+
         budget = {"left": MAX_SITEMAP_FETCHES}
         seen: set[str] = set()
         urls: list[str] = []
@@ -132,6 +155,54 @@ class SitemapAdapter(Adapter):
             if len(urls) >= MAX_URLS:
                 break
         return urls[:MAX_URLS]
+
+    def _one_per_language(self, candidates: list[str], language: str,
+                          prefer: str | None = None) -> list[str]:
+        """Collapse sitemaps that are translations of each other.
+
+        Cisco's robots.txt declares two: `/ca/fr/sitemap_index.xml` and
+        `/global/en/sitemap_index.xml`. Both were followed, both list the same
+        openings, and the result was every Cisco posting stored twice - 2,752 rows
+        for 1,376 real jobs - because a translated posting has a different URL, a
+        different title key and a location in a different language, so nothing
+        reconciled them. The digest then reported the same opening twice, in two
+        languages, as two new jobs.
+
+        Several sitemaps for one site is normal and wanted: `sitemap-jobs.xml` and
+        `sitemap-pages.xml` hold different content. Several *translations* of one
+        sitemap are not. Two things have to hold before one is dropped: the
+        candidates end in the same file name, and at least one of them carries a
+        language code as a path segment. `/sitemap.xml` beside `/news/sitemap.xml`
+        fails the second test and both are kept.
+
+        The choice is reported as a note rather than made silently, because it is a
+        guess about someone else's site; `language` or `sitemap_include` on the
+        source overrides it. So does the source's own endpoint: a sitemap somebody
+        recorded by hand during discovery is never dropped in favour of a guess.
+        """
+        groups: dict[tuple[str, str], list[str]] = {}
+        for url in candidates:
+            parsed = urlparse(url)
+            name = parsed.path.rsplit("/", 1)[-1].lower()
+            groups.setdefault((parsed.netloc.lower(), name), []).append(url)
+
+        kept: list[str] = []
+        for group in groups.values():
+            if len(group) == 1 or not any(_locales_in(u) for u in group):
+                kept.extend(group)
+                continue
+            choice = (prefer if prefer in group
+                      else _pick_language(group, language)
+                      or _pick_language(group, "")
+                      or group[0])
+            dropped = [u for u in group if u != choice]
+            self.note(
+                f"robots.txt declared {len(group)} translations of the same "
+                f"sitemap; following {choice}, skipping {', '.join(dropped)} "
+                f"- set `language` or `sitemap_include` on the source to choose "
+                f"differently")
+            kept.append(choice)
+        return kept
 
     def _walk(self, client: httpx.Client, url: str, seen: set[str], budget: dict,
               depth: int = 0) -> list[str]:
@@ -199,6 +270,29 @@ class SitemapAdapter(Adapter):
                     raw={k: v for k, v in item.items() if k != "description"},
                 )
         return None
+
+
+def _locales_in(url: str) -> list[str]:
+    """The language codes appearing as path segments of a URL."""
+    return [seg.lower() for seg in urlparse(url).path.split("/")
+            if _LOCALE_CODE.match(seg)]
+
+
+def _pick_language(group: list[str], language: str) -> str | None:
+    """The member written in `language`, or with no language at all when it is empty.
+
+    A sitemap with no locale segment is the canonical one on most sites, which makes
+    it the right second choice when the wanted language is not on offer.
+    """
+    for url in group:
+        locales = _locales_in(url)
+        if language:
+            if any(loc == language or loc.startswith(f"{language}-")
+                   or loc.startswith(f"{language}_") for loc in locales):
+                return url
+        elif not locales:
+            return url
+    return None
 
 
 def _plain(html: str) -> str:

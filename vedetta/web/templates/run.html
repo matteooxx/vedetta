@@ -47,7 +47,7 @@ and the next run picks up where this one left off.</p>
 {% endif %}
 
 <div class="grid" style="margin-top:16px">
-  {% for key, label, tone in [('ok','Answered','positive'), ('empty','Returned nothing','warning'), ('error','Failed','blocking')] %}
+  {% for key, label, tone in [('ok','Answered','positive'), ('empty','Returned nothing','warning'), ('partial','Short listing','warning'), ('error','Failed','blocking')] %}
   <div class="tile">
     <div class="n {{ tone if snap.outcomes.get(key) else '' }}">{{ snap.outcomes.get(key, 0) }}</div>
     <div class="k">{{ label }}</div>

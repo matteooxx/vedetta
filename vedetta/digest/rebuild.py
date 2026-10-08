@@ -102,7 +102,8 @@ def report_for(conn, config, run_id: int) -> dict:
 
     polls = conn.execute(
         "SELECT e.display_name AS employer, s.platform AS platform, "
-        "       sp.outcome AS outcome, sp.item_count AS item_count "
+        "       sp.outcome AS outcome, sp.item_count AS item_count, "
+        "       sp.note AS note "
         "FROM source_poll sp JOIN source s ON s.id = sp.source_id "
         "JOIN employer e ON e.id = s.employer_id WHERE sp.run_id = ? "
         "ORDER BY e.display_name", (run_id,)).fetchall()
@@ -122,7 +123,7 @@ def report_for(conn, config, run_id: int) -> dict:
         "rebuilt": True,
         "polls": [{"employer": p["employer"], "platform": p["platform"],
                    "outcome": p["outcome"], "count": p["item_count"] or 0,
-                   "seeding": seeding} for p in polls],
+                   "note": p["note"], "seeding": seeding} for p in polls],
         "new": [] if seeding else new,
         "seeded": rebuilt if seeding else [],
         "excluded": [] if seeding else excluded,

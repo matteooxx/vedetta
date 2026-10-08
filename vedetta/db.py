@@ -81,11 +81,19 @@ CREATE TABLE IF NOT EXISTS source_poll (
   id          INTEGER PRIMARY KEY,
   run_id      INTEGER NOT NULL REFERENCES run(id) ON DELETE CASCADE,
   source_id   INTEGER NOT NULL REFERENCES source(id) ON DELETE CASCADE,
+  -- ok | empty | partial | error. `partial` means the platform answered and the
+  -- postings are usable, but the listing was demonstrably incomplete - a large board
+  -- that changed while being paginated. Kept distinct from `error` because a failure
+  -- notice that is usually nothing teaches the reader to skip failure notices, and
+  -- kept distinct from `ok` because nothing may be closed on an incomplete listing.
   outcome     TEXT NOT NULL,
   http_status INTEGER,
   item_count  INTEGER,
   duration_ms INTEGER,
   error       TEXT,
+  -- Something survivable worth saying. `error` stays reserved for why a poll failed,
+  -- so the two are never confused by a reader or by a query.
+  note        TEXT,
   UNIQUE (run_id, source_id)
 );
 
@@ -209,6 +217,9 @@ MIGRATIONS = {
         "state": "TEXT NOT NULL DEFAULT 'finished'",
         "heartbeat_at": "TEXT",
         "error": "TEXT",
+    },
+    "source_poll": {
+        "note": "TEXT",
     },
     "posting": {
         "workable": "INTEGER NOT NULL DEFAULT 1",
