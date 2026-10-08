@@ -15,6 +15,7 @@ import time
 from datetime import datetime, timezone
 
 from . import places as places_mod
+from . import placetree as placetree_mod
 from .skills import SkillMatcher
 from .adapters.base import AdapterError, normalise
 from .adapters.greenhouse import GreenhouseAdapter
@@ -483,6 +484,9 @@ def execute_in(conn, config, run_id: int, reporter=None,
         conn.commit()
 
     report["closed"] = close_missing(conn, run_id)
+    # The location tree, rebuilt from the places this run has just written. It lives
+    # beside them so the filter can never offer a hierarchy over places that are gone.
+    placetree_mod.rebuild(conn)
     report["new"].sort(key=lambda p: (-p["score"], p["employer"], p["title"]))
     # Split for the digest. Both halves are reported; only the prominence differs.
     report["excluded"] = [p for p in report["new"] if not p.get("workable", True)]
@@ -555,4 +559,5 @@ def relabel(conn, config) -> dict:
         else:
             stats["workable"] += 1
     conn.commit()
+    stats["places"] = placetree_mod.rebuild(conn)
     return stats

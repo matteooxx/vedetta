@@ -37,6 +37,86 @@
   {% endif %}
 {% endmacro %}
 
+{# The location facet, as a tree. The flat version listed 102 values at three
+   levels in one column ordered by count - EMEA beside Ireland beside Dublin - and
+   Dublin is inside Ireland, so picking both found nothing that Ireland alone had not.
+
+   No script, and no <details> either: a link inside a <summary> is ambiguous across
+   browsers, where a click may toggle the disclosure instead of following the link.
+   A hidden-but-focusable checkbox with a CSS sibling rule has neither problem - it
+   works with JavaScript off, it is reachable by keyboard, and the row stays an
+   ordinary link, which is what makes the whole filter bookmarkable. #}
+{% macro place_row(o, sel, indent=0) %}
+  <a href="{{ url_for('postings', **sel.toggled('place', o.value)) }}"
+     class="opt {{ 'on' if sel.is_on('place', o.value) }}"
+     {% if indent %}style="padding-left:{{ 5 + indent }}px"{% endif %}
+     aria-pressed="{{ 'true' if sel.is_on('place', o.value) else 'false' }}">
+    <span class="box" aria-hidden="true">{{ '✓' if sel.is_on('place', o.value) else '' }}</span>
+    <span class="opt-label">{{ o.label }}</span>
+    <span class="opt-n">{{ o.n }}</span>
+  </a>
+{% endmacro %}
+
+{% macro place_facet(tops, sel, kids=6) %}
+  {% set regions = tops | selectattr('kind', 'equalto', 'region') | list %}
+  {% set countries = tops | rejectattr('kind', 'equalto', 'region') | list %}
+  <details class="facet" open>
+    <summary>
+      Location
+      {% if sel['place'] %}<span class="badge">{{ sel['place']|length }}</span>{% endif %}
+    </summary>
+
+    {% if regions %}
+    <p class="tier">Open to a whole region</p>
+    <ul class="facet-list">
+      {% for o in regions %}<li class="leaf">{{ place_row(o, sel) }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+
+    {% if countries %}
+    <p class="tier">Country, and what is inside it</p>
+    <p class="facet-hint">A country covers everything inside it, so Germany includes
+      Berlin whether or not the posting named the country.</p>
+    <ul class="facet-list">
+      {% for o in countries %}
+      {% set inside = o.children | selectattr('value', 'in', sel['place']) | list %}
+      <li class="{{ 'branch' if o.children else 'leaf' }}">
+        {% if o.children %}
+        {# Open when something inside it is chosen, or the choice would be invisible. #}
+        <input type="checkbox" class="twist-box" id="open-{{ loop.index }}"
+               aria-label="Show what is inside {{ o.label }}"
+               {{ 'checked' if inside }}>
+        <span class="branch-head">
+          <label class="twist" for="open-{{ loop.index }}" aria-hidden="true"></label>
+          {{ place_row(o, sel) }}
+        </span>
+        <ul class="facet-list kids">
+          {% for k in o.children[:kids] %}<li>{{ place_row(k, sel, 6) }}</li>{% endfor %}
+          {% if o.children|length > kids %}
+            {% for k in o.children[kids:] if sel.is_on('place', k.value) %}
+              <li>{{ place_row(k, sel, 6) }}</li>
+            {% endfor %}
+            <li>
+              <input type="checkbox" class="twist-box rest-box" id="rest-{{ loop.index }}"
+                     aria-label="Show the rest of {{ o.label }}">
+              <label class="rest" for="rest-{{ loop.index }}">{{ o.children|length - kids }}
+                more in {{ o.label }}</label>
+              <ul class="facet-list rest-list">
+                {% for k in o.children[kids:] %}<li>{{ place_row(k, sel, 6) }}</li>{% endfor %}
+              </ul>
+            </li>
+          {% endif %}
+        </ul>
+        {% else %}
+        {{ place_row(o, sel) }}
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </details>
+{% endmacro %}
+
 {% block body %}
 <h1>Postings</h1>
 <p class="lede">Pick as many values as you like in each group — two locations, four
@@ -83,8 +163,7 @@ all your other choices.</p>
     </p>
     {% endif %}
 
-    {{ facet('place',    'Location', view.options.place, open=true, limit=14,
-             hint='A posting naming several places appears under each of them.') }}
+    {{ place_facet(view.options.place, sel) }}
     {{ facet('employer', 'Employer', view.options.employer, limit=14) }}
     {{ facet('skill', 'Technologies', view.options.skill, limit=18,
              hint='Green on a card means it is on your list, amber means it is not. Neither is a verdict.') }}

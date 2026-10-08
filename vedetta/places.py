@@ -191,6 +191,29 @@ ALIASES.update({
 # same way and then matched nothing at all.
 KNOWN_COUNTRIES = {name.lower(): name for name in regions_mod.ALL_COUNTRIES}
 
+# Cities and subdivisions, for the same reason one step down. A name beginning with a
+# direction word was being taken apart by the token loop, which strips "north" and
+# "south" as positional noise: "South Carolina" came out as "Carolina", "West
+# Virginia" as "Virginia", and "New South Wales" as "New" plus the United Kingdom,
+# because Wales resolves to a country. A posting in Sydney therefore read as British,
+# which for a reader needing a visa is the difference between two answers.
+#
+# Checked whole, before anything is split, and the name is kept AS WRITTEN - this
+# module reports what the platform said. Working out the country from it is the
+# judging layer's job.
+def _key(text: str) -> str:
+    """The lookup key: folded, lowercased, punctuation to spaces, spaces collapsed.
+
+    One function, used to build the tables and to look in them. The first version
+    built the keys one way and searched them another, so "North Rhine-Westphalia"
+    missed its own entry over a hyphen.
+    """
+    return WS.sub(" ", re.sub(r"[^a-z\s]", " ",
+                              regions_mod.fold(text).lower())).strip()
+
+
+KNOWN_PLACES = {_key(name): name for name in regions_mod.CITY_COUNTRY}
+
 # Cities worth keeping even when they arrive glued to a country code, e.g. "GB-London".
 GLUED = re.compile(r"^([A-Z]{2})[-–](.+)$")
 
@@ -217,6 +240,8 @@ def _canonical(fragment: str) -> str | None:
         return ALIASES[lowered]
     if lowered in KNOWN_COUNTRIES:
         return KNOWN_COUNTRIES[lowered]
+    if lowered in KNOWN_PLACES:
+        return _title(text)
     # A region is a place, not noise. 63 postings in the watched population give no
     # place at all, only a region - "Home based - Worldwide", "Home Based - APAC" -
     # and they were being discarded here, which left them unfilterable and
@@ -227,7 +252,11 @@ def _canonical(fragment: str) -> str | None:
         return group
     if lowered in NOISE:
         return None
-    # Title-case, but leave an already-capitalised token alone so acronyms survive.
+    return _title(text)
+
+
+def _title(text: str) -> str:
+    """Title-case, leaving an already-capitalised token alone so acronyms survive."""
     def cap(word: str) -> str:
         if word.isupper():
             return word
@@ -255,6 +284,8 @@ def _places_in(fragment: str) -> list[str]:
         return [ALIASES[whole]]
     if whole in KNOWN_COUNTRIES:
         return [KNOWN_COUNTRIES[whole]]
+    if whole in KNOWN_PLACES:
+        return [_title(text)]
     group = regions_mod.canonical_group(whole)
     if group is not None:
         return [group]

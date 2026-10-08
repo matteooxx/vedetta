@@ -203,20 +203,32 @@ def is_platform_region(name: str) -> bool:
 
 # ------------------------------------------------------- a country from a city
 
-# Cities deliberately left out, because the name belongs to more than one country and
-# a wrong answer here excludes a posting the reader could have taken:
+# Cities deliberately absent from the table below, because the name belongs to more
+# than one country and a wrong answer here excludes a posting the reader could have
+# taken. Kept as data rather than as a comment, because two other things need it: the
+# test that asserts none of them resolves, and the "County X" rule further down,
+# which has to recognise Dublin as a city even though it cannot place it.
 #
-#   London      England and Ontario          Hamilton    Ontario and New Zealand
-#   Birmingham  England and Alabama          Victoria    British Columbia and Australia
-#   Cambridge   England and Massachusetts    Perth       Scotland and Australia
-#   Dublin      Ireland, Ohio and California Toledo      Spain and Ohio
-#   Richmond    England, Virginia, BC        Newcastle   England and Australia
-#   Rochester   England and New York         Windsor     England and Ontario
-#   Georgia     a US state and a country     Wellington  New Zealand and Somerset
-#
-# Several of those are already in the reader's own rules by name, which is the right
-# place for them: a judgement about an ambiguous name belongs to the person it
+# Several of these are already in the reader's own rules by name, which is the right
+# home for them: a judgement about an ambiguous name belongs to the person it
 # affects, not to a table shipped with the program.
+AMBIGUOUS_CITIES = {
+    "London": "England and Ontario",
+    "Birmingham": "England and Alabama",
+    "Cambridge": "England and Massachusetts",
+    "Dublin": "Ireland, Ohio and California",
+    "Richmond": "England, Virginia and British Columbia",
+    "Rochester": "England and New York",
+    "Georgia": "a US state and a country",
+    "Hamilton": "Ontario and New Zealand",
+    "Victoria": "British Columbia and Australia",
+    "Perth": "Scotland and Australia",
+    "Toledo": "Spain and Ohio",
+    "Newcastle": "England and Australia",
+    "Windsor": "England and Ontario",
+    "Wellington": "New Zealand and Somerset",
+}
+
 CITY_COUNTRY: dict[str, str] = {}
 
 
@@ -357,7 +369,36 @@ _add("United States",
      "AR", "MS", "NE", "NM", "ND", "SD", "WV", "RI", "NH", "VT", "ME", "AK", "HI")
 
 _add("Canada", "Ontario", "British Columbia", "Alberta", "Manitoba", "Saskatchewan",
-     "Nova Scotia", "New Brunswick", "Newfoundland and Labrador")
+     "Nova Scotia", "New Brunswick", "Newfoundland and Labrador", "Quebec")
+
+# Subdivisions whose names start with a direction word, which the place extractor
+# would otherwise take apart: "South Carolina" became "Carolina", "New South Wales"
+# became "New" plus the United Kingdom - so a Sydney posting read as British. The
+# whole-fragment check in places.py consults this table before tokenising anything.
+_add("Australia", "New South Wales", "Victoria State", "Queensland",
+     "Western Australia", "South Australia", "Tasmania",
+     "Australian Capital Territory", "Northern Territory")
+_add("Germany", "North Rhine-Westphalia", "Nordrhein-Westfalen", "Bavaria",
+     "Bayern", "Hesse", "Hessen", "Baden-Wurttemberg", "Baden-Wuerttemberg",
+     "Lower Saxony", "Niedersachsen", "Saxony", "Sachsen", "Rhineland-Palatinate",
+     "Schleswig-Holstein", "Brandenburg", "Thuringia", "Saarland", "Bremen")
+_add("Netherlands", "South Holland", "North Holland", "Zuid-Holland",
+     "Noord-Holland", "Noord-Brabant", "North Brabant", "Utrecht Province",
+     "Gelderland", "Overijssel", "Limburg")
+_add("United Kingdom", "West Midlands", "South Yorkshire", "West Yorkshire",
+     "North Yorkshire", "Greater London", "Greater Manchester", "Merseyside",
+     "Tyne and Wear", "Northern Ireland", "Herefordshire", "Hertfordshire",
+     "Aberdeenshire", "Berkshire", "Oxfordshire", "Cambridgeshire")
+_add("Ireland", "County Dublin", "County Cork", "County Galway", "County Limerick",
+     "County Meath", "County Kildare", "County Wicklow")
+_add("Poland", "Masovian Voivodeship", "Lesser Poland", "Silesia",
+     "Lower Silesia", "Greater Poland", "Pomerania")
+_add("France", "Grand Est", "Nouvelle-Aquitaine", "Auvergne-Rhone-Alpes",
+     "Ile-de-France", "Occitanie", "Hauts-de-France", "Provence-Alpes-Cote d'Azur")
+_add("Spain", "Catalonia", "Cataluna", "Andalusia", "Basque Country",
+     "Community of Madrid", "Valencian Community", "Galicia")
+_add("Italy", "Lombardy", "Lombardia", "Lazio", "Piedmont", "Piemonte", "Veneto",
+     "Tuscany", "Toscana", "Emilia-Romagna", "Campania", "Sicily", "Sicilia")
 
 
 def infer_country(place: str) -> str | None:
@@ -373,3 +414,64 @@ def infer_country(place: str) -> str | None:
     # "Düsseldorf". Without this the six remaining unjudged postings were all
     # accents.
     return CITY_COUNTRY.get(fold(place.strip()).lower())
+
+# ---------------------------------------------- one name per place, for display
+
+# The same place arrives spelled several ways and became several filter options:
+# Milan beside Milano, Genoa beside Genova, Newcastle beside Newcastle Upon Tyne,
+# Dublin beside County Dublin. Four options where there is one place, each with a
+# fraction of the count, and a reader who picks one of them silently misses the rest.
+#
+# The canonical name is the one a reader would recognise, not the one that happens to
+# be commonest in the data. Written out rather than guessed from string similarity:
+# Milan and Milano are the same city, Cork and Corfu are not.
+CANON_SPELLINGS = {
+    # Italy
+    "milano": "Milan", "roma": "Rome", "torino": "Turin", "firenze": "Florence",
+    "napoli": "Naples", "padova": "Padua", "genova": "Genoa", "venezia": "Venice",
+    # Germany, Austria, Switzerland
+    "muenchen": "Munich", "munchen": "Munich", "koeln": "Cologne",
+    "koln": "Cologne", "nuernberg": "Nuremberg", "nurnberg": "Nuremberg",
+    "duesseldorf": "Dusseldorf", "wien": "Vienna", "zuerich": "Zurich",
+    "geneve": "Geneva", "wuerzburg": "Wurzburg",
+    # Iberia and France
+    "lisboa": "Lisbon", "sevilla": "Seville", "cataluna": "Catalonia",
+    # the Low Countries
+    "bruxelles": "Brussels", "antwerpen": "Antwerp", "den haag": "The Hague",
+    "zuid-holland": "South Holland", "noord-holland": "North Holland",
+    "noord-brabant": "North Brabant",
+    # the north and east
+    "warszawa": "Warsaw", "cracow": "Krakow", "praha": "Prague",
+    "bucuresti": "Bucharest", "beograd": "Belgrade", "kiev": "Kyiv",
+    "goteborg": "Gothenburg", "goeteborg": "Gothenburg",
+    "kobenhavn": "Copenhagen", "koebenhavn": "Copenhagen", "arhus": "Aarhus",
+    # the British Isles: the fuller name wins, being the unambiguous one
+    "newcastle": "Newcastle Upon Tyne",
+    # region shorthand that means the same scope
+    "global": "Worldwide", "international": "Worldwide", "anywhere": "Worldwide",
+    "amer": "Americas", "amers": "Americas", "namer": "North America",
+    "apj": "APAC", "apjc": "APAC", "nordic": "Nordics", "ukandi": "UKI",
+    "emeia": "EMEA",
+}
+
+
+def canonical_place(name: str) -> str:
+    """One name per place, for the filter list and nothing else.
+
+    The stored place keeps whatever the platform wrote - this module never rewrites
+    what was published. It only decides which spellings share a row in the filter.
+    """
+    key = fold(name.strip()).lower()
+    if key in CANON_SPELLINGS:
+        return CANON_SPELLINGS[key]
+    # "County Dublin" is Dublin, and so are County Cork and County Galway - but only
+    # where the remainder is a city this module actually knows, so "County Line" is
+    # left alone.
+    if key.startswith("county "):
+        rest = key[7:].strip()
+        # Known as a place either way: in the table, or on the list of names too
+        # ambiguous to put in it. Dublin is the case that matters and it is on the
+        # second list, so checking only the table missed it.
+        if rest in CITY_COUNTRY or rest in {c.lower() for c in AMBIGUOUS_CITIES}:
+            return name.strip()[7:].strip()
+    return name.strip()

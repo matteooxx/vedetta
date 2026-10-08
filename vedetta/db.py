@@ -133,6 +133,22 @@ CREATE TABLE IF NOT EXISTS posting_place (
 );
 CREATE INDEX IF NOT EXISTS posting_place_place ON posting_place(place);
 
+-- Which place is inside which, and which spellings are one place. Derived from the
+-- postings by placetree.rebuild and rewritten whenever the places are, so it can
+-- never describe a set of places that no longer exists.
+--
+-- A table rather than a computation inside the filter query, for two reasons: the
+-- location facet has to expand a country into its cities on every page load, and a
+-- reader who wonders why Dublin sits under Ireland can look.
+CREATE TABLE IF NOT EXISTS place_meta (
+  place  TEXT PRIMARY KEY,          -- as stored in posting_place
+  canon  TEXT NOT NULL,             -- one name per place, for the filter list
+  parent TEXT,                      -- the country it is in, when that is known
+  kind   TEXT NOT NULL              -- region | country | place
+);
+CREATE INDEX IF NOT EXISTS place_meta_parent ON place_meta(parent);
+CREATE INDEX IF NOT EXISTS place_meta_canon ON place_meta(canon);
+
 CREATE TABLE IF NOT EXISTS sighting (
   id           INTEGER PRIMARY KEY,
   run_id       INTEGER NOT NULL REFERENCES run(id) ON DELETE CASCADE,

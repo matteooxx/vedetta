@@ -286,3 +286,41 @@ def test_the_inference_folds_accents(city, country):
     """The table is written without accents and the platforms are not. Before this,
     every posting still unjudged after the region work was an accent."""
     assert regions.infer_country(city) == country
+
+
+# --- names that begin with a direction word -------------------------------
+
+@pytest.mark.parametrize("location,expected", [
+    # Every one of these was being taken apart by the token loop, which strips
+    # "north" and "south" as positional noise.
+    ("Raleigh, North Carolina, United States",
+     ["Raleigh", "North Carolina", "United States"]),
+    ("Charleston, South Carolina", ["Charleston", "South Carolina"]),
+    ("West Virginia", ["West Virginia"]),
+    ("North Dakota", ["North Dakota"]),
+    ("South Holland, Netherlands", ["South Holland", "Netherlands"]),
+    ("North Rhine-Westphalia, Germany", ["North Rhine-Westphalia", "Germany"]),
+    ("Western Australia", ["Western Australia"]),
+    # The worst of them: "Wales" resolves to a country, so a Sydney posting read as
+    # British - which for a reader needing a visa is the difference between
+    # "acceptable" and "needs sponsorship".
+    ("New South Wales, Australia", ["New South Wales", "Australia"]),
+])
+def test_a_place_beginning_with_a_direction_survives_whole(location, expected):
+    from vedetta.places import extract
+    assert extract(location)[0] == expected
+
+
+def test_a_trailing_country_code_still_resolves():
+    """The token loop earns its place: "Warsaw pl" has to become Warsaw in Poland.
+    The fix above must not take that away."""
+    from vedetta.places import extract
+    assert extract("Warsaw pl")[0] == ["Warsaw", "Poland"]
+    assert extract("GB-London")[0] == ["United Kingdom", "London"]
+    assert extract("Paris, IDF, fr")[0] == ["Paris", "France"]
+
+
+def test_a_regional_grouping_is_still_dropped():
+    """And so does the noise list: "US East" must not produce a place called East."""
+    from vedetta.places import extract
+    assert extract("US East")[0] == []

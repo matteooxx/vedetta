@@ -116,10 +116,24 @@ def _clauses(selection: Selection, skip: str | None = None) -> tuple[list[str], 
         params += selection.employer
 
     if skip != "place" and selection.place:
+        # A chosen value matches a posting three ways, and all three are needed for
+        # the count beside it to be the truth:
+        #
+        #   the place itself          "Dublin" against a posting tagged Dublin
+        #   another spelling of it    the same posting tagged "County Dublin"
+        #   something inside it       "Ireland" against a posting tagged only Galway
+        #
+        # The last one is the point. Ireland used to match only postings that wrote
+        # the word Ireland, so the filter said 43 and the panel said Dublin 37 beside
+        # it, and picking both found nothing that picking Ireland alone had not.
         marks = ",".join("?" * len(selection.place))
-        where.append(f"EXISTS (SELECT 1 FROM posting_place pp "
-                     f"WHERE pp.posting_id = p.id AND pp.place IN ({marks}))")
-        params += selection.place
+        where.append(
+            f"EXISTS (SELECT 1 FROM posting_place pp "
+            f"LEFT JOIN place_meta m ON m.place = pp.place "
+            f"WHERE pp.posting_id = p.id AND ("
+            f"coalesce(m.canon, pp.place) IN ({marks}) "
+            f"OR m.parent IN ({marks})))")
+        params += selection.place + selection.place
 
     if skip != "skill" and selection.skill:
         marks = ",".join("?" * len(selection.skill))
@@ -218,6 +232,64 @@ def scope_counts(conn, selection: Selection) -> dict:
     return {"workable": workable, "excluded": excluded, "all": workable + excluded}
 
 
+
+def place_tree(conn, selection: Selection) -> list[dict]:
+    """The location facet, as a two-level tree instead of one flat list.
+
+    Returns the top level in order - regions first, then countries by size, then
+    anything no country could be found for - each row carrying its `children`.
+
+    Every count is of DISTINCT POSTINGS, which is why the country rows need their own
+    query rather than a sum over their children: a posting tagged both "Ireland" and
+    "Dublin" must count once, and most are tagged both.
+    """
+    where, params = _clauses(selection, "place")
+    clause = (" WHERE " + " AND ".join(where)) if where else ""
+
+    rolled = conn.execute(
+        "SELECT coalesce(m.parent, coalesce(m.canon, pp.place)) AS top, "
+        "       count(DISTINCT pp.posting_id) AS n "
+        "FROM posting_place pp "
+        "LEFT JOIN place_meta m ON m.place = pp.place "
+        "JOIN posting p ON p.id = pp.posting_id "
+        "JOIN employer e ON e.id = p.employer_id"
+        + clause + " GROUP BY top", params).fetchall()
+
+    leaves = conn.execute(
+        "SELECT coalesce(m.parent, coalesce(m.canon, pp.place)) AS top, "
+        "       coalesce(m.canon, pp.place) AS value, "
+        "       coalesce(m.kind, 'place') AS kind, "
+        "       count(DISTINCT pp.posting_id) AS n "
+        "FROM posting_place pp "
+        "LEFT JOIN place_meta m ON m.place = pp.place "
+        "JOIN posting p ON p.id = pp.posting_id "
+        "JOIN employer e ON e.id = p.employer_id"
+        + clause + " GROUP BY top, value, kind", params).fetchall()
+
+    totals = {row["top"]: row["n"] for row in rolled}
+    kinds: dict[str, str] = {}
+    children: dict[str, list[dict]] = {}
+    for row in leaves:
+        if row["value"] == row["top"]:
+            kinds[row["top"]] = row["kind"]
+            continue
+        children.setdefault(row["top"], []).append(
+            {"value": row["value"], "label": row["value"], "n": row["n"]})
+
+    tops: list[dict] = []
+    for top, n in totals.items():
+        kids = sorted(children.get(top, []), key=lambda c: (-c["n"], c["label"]))
+        tops.append({"value": top, "label": top, "n": n,
+                     "kind": kinds.get(top, "place"), "children": kids})
+
+    # Regions first and labelled as such: they are not places the reader could move
+    # to, they are postings open to a whole region, and mixing them in with countries
+    # is half of what made the flat list unreadable.
+    order = {"region": 0, "country": 1, "place": 2}
+    tops.sort(key=lambda t: (order.get(t["kind"], 3), -t["n"], t["label"]))
+    return tops
+
+
 def options(conn, selection: Selection) -> dict:
     """Every facet's options with counts, each computed ignoring its own facet."""
     out: dict[str, list[dict]] = {}
@@ -226,13 +298,7 @@ def options(conn, selection: Selection) -> dict:
                        "count(*) AS n", "GROUP BY e.key ORDER BY n DESC, e.display_name")
     out["employer"] = [dict(r) for r in conn.execute(sql, params).fetchall()]
 
-    where, params = _clauses(selection, "place")
-    sql = ("SELECT pp.place AS value, pp.place AS label, count(*) AS n "
-           "FROM posting_place pp JOIN posting p ON p.id = pp.posting_id "
-           "JOIN employer e ON e.id = p.employer_id"
-           + (" WHERE " + " AND ".join(where) if where else "")
-           + " GROUP BY pp.place HAVING n > 0 ORDER BY n DESC, pp.place LIMIT 60")
-    out["place"] = [dict(r) for r in conn.execute(sql, params).fetchall()]
+    out["place"] = place_tree(conn, selection)
 
     where, params = _clauses(selection, "skill")
     sql = ("SELECT ps.term AS value, ps.term AS label, max(ps.have) AS have, "
