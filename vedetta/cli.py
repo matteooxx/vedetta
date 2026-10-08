@@ -4,6 +4,7 @@
     vedetta run           poll, reconcile, label, and send the digest
     vedetta run --stdout  the same, printing instead of sending
     vedetta check         read-only integrity report
+    vedetta digest --run N  rebuild and queue a run's digest that never went out
 """
 from __future__ import annotations
 
@@ -13,7 +14,8 @@ import sys
 from . import config as config_mod
 from . import db as db_mod
 from . import run as run_mod
-from .digest import mail, outbox, render
+from .digest import dispatch as dispatch_mod
+from .digest import outbox, rebuild
 from .runlock import RunInProgress, acquire
 
 
@@ -52,40 +54,105 @@ def cmd_run(args) -> int:
         print(f"skipped: {exc}", file=sys.stderr)
         conn.close()
         return 3
-    body = render.render_text(report, cfg)
-    subject_line = render.subject(report, cfg.digest.get("subject_prefix", "Vedetta"))
-
-    # A run where every source was being seeded has no news in it, so there is
-    # nothing worth sending; any other run sends, including a quiet one, because a
-    # missing email has to keep meaning "something is wrong".
-    if args.stdout or (report["seeding"] and not report["new"]):
+    # One shared decision for every caller. The interface used to make this call
+    # itself and made it wrong - it queued nothing - so there is now only one copy.
+    if args.stdout:
+        subject_line, body = dispatch_mod.compose(report, cfg)
         print(subject_line)
         print()
         print(body)
-        if report["seeding"] and not args.stdout:
-            print()
-            print("(every source was seeded on this run: nothing sent by design)")
         conn.close()
         return 0
 
-    if cfg.transport == "host":
-        # Handed to the host rather than sent from here: the machine already has a
-        # working mail configuration, so this application needs no credential of its
-        # own. The runner delivers it and records the delivery.
-        path = outbox.write(cfg.db_path, report["run_id"], subject_line, body)
-        print(f"digest queued for the host transport: {path}")
+    outcome = dispatch_mod.dispatch(conn, cfg, report)
+    if outcome.action == "skipped":
+        print(outcome.subject)
+        print()
+        print(outcome.body)
+        print()
+        print(f"({outcome.detail})")
         conn.close()
         return 0
-
-    try:
-        result = mail.send(subject_line, body, cfg.digest)
-        run_mod.mark_digest_sent(conn, report["run_id"])
-        print(result)
-    except mail.MailNotConfigured as exc:
-        print(f"mail not configured ({exc}); printing instead", file=sys.stderr)
-        print(body)
+    if outcome.action == "unsendable":
+        print(outcome.detail, file=sys.stderr)
+        print(outcome.body)
         conn.close()
         return 2
+    print(outcome.detail)
+    conn.close()
+    return 0
+
+
+def cmd_digest(args) -> int:
+    """Rebuild a past run's digest and queue it.
+
+    The recovery path for a digest that never went out. It happened: runs started
+    from the interface queued nothing for a while, so their postings were recorded -
+    and therefore stopped being new - without anybody being told. `--list` shows
+    which runs are in that state.
+    """
+    cfg = _load(args)
+    conn = db_mod.connect(cfg.db_path)
+    if args.list:
+        rows = conn.execute(
+            "SELECT r.id, r.started_at, r.trigger, r.digest_sent, r.seeding, "
+            "       (SELECT COUNT(*) FROM posting p WHERE p.first_seen_run = r.id) "
+            "         AS first_seen, "
+            "       (SELECT COUNT(*) FROM posting p WHERE p.first_seen_run = r.id "
+            "          AND p.workable = 1) AS workable "
+            "FROM run r WHERE r.state = 'finished' ORDER BY r.id").fetchall()
+        queued = {p.run_id for p in outbox.pending(cfg.db_path)}
+        print(f"{'run':>4}  {'started':<20} {'trigger':<9} {'first seen':>10} "
+              f"{'workable':>9}  digest")
+        lost = []
+        for row in rows:
+            if row["digest_sent"]:
+                state = "sent"
+            elif row["id"] in queued:
+                state = "queued"
+            elif row["seeding"]:
+                # A seeding run reports nothing by design: it is somebody's back
+                # catalogue. Calling that a loss would bury the real ones.
+                state = "seeded, by design"
+            elif row["first_seen"]:
+                state = "NEVER REPORTED"
+                lost.append(row)
+            else:
+                state = "nothing to report"
+            print(f"{row['id']:>4}  {row['started_at'][:19]:<20} "
+                  f"{row['trigger']:<9} {row['first_seen']:>10} "
+                  f"{row['workable']:>9}  {state}")
+        if lost:
+            total = sum(r["workable"] for r in lost)
+            print()
+            print(f"{len(lost)} run(s) found postings and reported none of them: "
+                  f"{total} workable in total.")
+            print("Rebuild one with:  vedetta digest --run N")
+        conn.close()
+        return 0
+
+    if not args.run:
+        print("give --run N, or --list to see which runs need one", file=sys.stderr)
+        conn.close()
+        return 1
+
+    try:
+        report = rebuild.report_for(conn, cfg, args.run)
+    except LookupError as exc:
+        print(str(exc), file=sys.stderr)
+        conn.close()
+        return 1
+
+    if args.stdout:
+        subject_line, body = dispatch_mod.compose(report, cfg)
+        print(subject_line)
+        print()
+        print(body)
+        conn.close()
+        return 0
+
+    outcome = dispatch_mod.dispatch(conn, cfg, report)
+    print(outcome.detail)
     conn.close()
     return 0
 
@@ -173,6 +240,16 @@ def main(argv=None) -> int:
     outbox_parser.add_argument("--sent", type=int, metavar="RUN",
                                help="record a run as delivered and remove it")
     outbox_parser.set_defaults(func=cmd_outbox)
+
+    digest_parser = sub.add_parser(
+        "digest", help="rebuild and queue the digest for a run that never sent one")
+    digest_parser.add_argument("--run", type=int, metavar="N",
+                               help="the run to rebuild")
+    digest_parser.add_argument("--list", action="store_true",
+                               help="which runs have postings but never reported")
+    digest_parser.add_argument("--stdout", action="store_true",
+                               help="print it instead of queueing it")
+    digest_parser.set_defaults(func=cmd_digest)
     sub.add_parser("check").set_defaults(func=cmd_check)
 
     args = parser.parse_args(argv)

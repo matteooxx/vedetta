@@ -23,6 +23,7 @@ from .. import configstore
 from .. import facets
 from .. import insights as insights_mod
 from .. import progress as progress_mod
+from ..digest import dispatch as dispatch_mod
 from ..digest import outbox
 from .. import triage as triage_mod
 from .. import db as db_mod
@@ -292,7 +293,18 @@ def create_app() -> Flask:
                     ready.set()
                     reporter = progress_mod.Reporter(cfg.db_path, run_id)
                     try:
-                        run_mod.execute_in(inner, cfg, run_id, reporter=reporter)
+                        report = run_mod.execute_in(inner, cfg, run_id,
+                                                    reporter=reporter,
+                                                    finish=False)
+                        # The digest, through the same function the scheduled run
+                        # uses. Without this the run spent the novelty and reported
+                        # none of it: the postings were recorded, so the next run
+                        # found nothing new and nobody was ever told. The defect
+                        # this whole project exists to prevent, arriving by the one
+                        # route that had no second opinion watching it.
+                        outcome = dispatch_mod.dispatch(inner, cfg, report)
+                        reporter.note(outcome.detail)
+                        run_mod.finish_run(inner, run_id, "finished")
                     except Exception as exc:
                         # Recorded on the run, not only in a log: a run that died has
                         # to say so on the page the reader is already watching.

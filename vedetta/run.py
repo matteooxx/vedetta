@@ -374,12 +374,17 @@ def execute(conn, config, trigger: str = "manual", force_seed: bool = False,
 
 
 def execute_in(conn, config, run_id: int, reporter=None,
-               force_seed: bool = False) -> dict:
+               force_seed: bool = False, finish: bool = True) -> dict:
     """Carry out a run whose row already exists.
 
     Split out because the interface creates the run row first, in the request, so it
     can redirect the reader to a progress page before the work starts. Without that
     the page could not name the run it was supposed to be watching.
+
+    `finish=False` leaves the run marked running for the caller to close. The
+    interface uses it because composing and queueing the digest is part of the run:
+    marked finished a moment too early, the progress page stops refreshing just
+    before the digest appears, and the reader is told nothing about where it went.
     """
     sources = verified_sources(conn)
     seeding_sources = {s["id"] for s in sources
@@ -459,7 +464,8 @@ def execute_in(conn, config, run_id: int, reporter=None,
     if reporter is not None:
         reporter.note(f"{len(report['new'])} new, {len(report['excluded'])} excluded, "
                       f"{len(report['seeded'])} seeded")
-    finish_run(conn, run_id, "finished")
+    if finish:
+        finish_run(conn, run_id, "finished")
     return report
 
 

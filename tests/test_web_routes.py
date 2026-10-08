@@ -22,16 +22,18 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 @pytest.fixture()
-def client(tmp_path, monkeypatch):
+def client(tmp_path, monkeypatch, offline_config):
+    # The offline configuration, because two of these tests start a run and the
+    # shipped example watchlist would have them polling real company boards.
     monkeypatch.setenv("VEDETTA_ROOT", str(tmp_path))
-    monkeypatch.setenv("VEDETTA_CONFIG_DIR", os.path.join(ROOT, "config"))
+    monkeypatch.setenv("VEDETTA_CONFIG_DIR", offline_config)
     # Imported inside the fixture so the module reads the patched environment.
     import importlib
 
     from vedetta.web import app as app_module
     importlib.reload(app_module)
 
-    cfg = config_mod.load(tmp_path, os.path.join(ROOT, "config"))
+    cfg = config_mod.load(tmp_path, offline_config)
     conn = db_mod.connect(cfg.db_path)
     config_mod.sync_watchlist(conn, cfg.watchlist)
     conn.close()

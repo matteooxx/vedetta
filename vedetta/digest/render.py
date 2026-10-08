@@ -41,7 +41,11 @@ def subject(report: dict, prefix: str = "Vedetta") -> str:
         bits.append(f"{seeded} seeded")
     if broken:
         bits.append(f"{broken} source{'s' if broken > 1 else ''} failing")
-    return f"{prefix}: " + ", ".join(bits)
+    # Visible in the inbox list, before anything is opened: a rebuilt digest is
+    # about a run that already happened, and reading it as today's news wastes an
+    # afternoon on postings that have since closed.
+    late = " [rebuilt]" if report.get("rebuilt") else ""
+    return f"{prefix}{late}: " + ", ".join(bits)
 
 
 def render_text(report: dict, config=None) -> str:
@@ -50,6 +54,16 @@ def render_text(report: dict, config=None) -> str:
     lines.append(f"Vedetta - run {report['run_id']} - {stamp}")
     lines.append("=" * 62)
     lines.append("")
+
+    if report.get("rebuilt"):
+        # Said at the top, not in a footnote. A digest rebuilt days later looks
+        # exactly like a live one, and acting on it as though it were current means
+        # applying to postings that may already have closed.
+        lines.append("REBUILT AFTER THE FACT. This run's digest was never delivered,")
+        lines.append("so it has been reassembled from the database. The postings were")
+        lines.append("first seen on the date of the run above, NOT today: check each")
+        lines.append("one is still open before spending time on it.")
+        lines.append("")
 
     seeded = report.get("seeded") or []
     if seeded:
