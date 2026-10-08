@@ -32,12 +32,9 @@ def test_places_extracted(raw, expected):
 
 
 @pytest.mark.parametrize("raw", [
-    "2 Locations", "Remote", "EMEA - Remote", "", None,
-    # All seen live. "Home based - EMEA" produced a place called "Home" and "N/A"
-    # produced two places called "N" and "A", both of which became facet options.
-    "Home based - EMEA",
-    "Home Based - Americas; Home Based - APAC",
-    "Home based - Worldwide",
+    "2 Locations", "Remote", "", None,
+    # Seen live: "N/A" produced two places called "N" and "A", both of which became
+    # facet options.
     "N/A",
 ])
 def test_strings_with_no_place_yield_none(raw):
@@ -56,9 +53,30 @@ def test_home_based_counts_as_remote(raw):
     assert extract(raw)[1] is True
 
 
+@pytest.mark.parametrize("raw,expected", [
+    ("Home based - EMEA", ["EMEA"]),
+    ("EMEA - Remote", ["EMEA"]),
+    ("Home Based - Americas; Home Based - APAC", ["Americas", "APAC"]),
+    ("Home based - Worldwide", ["Worldwide"]),
+    ("Remote - LATAM", ["LATAM"]),
+])
+def test_a_region_is_a_place(raw, expected):
+    """These used to yield nothing, which was the point of the test they were in:
+    "Home based - EMEA" had produced a place called "Home". Discarding the whole
+    fragment fixed that and went too far - 63 postings in the watched population name
+    no place at all, only a region, so they could be neither filtered nor judged.
+
+    A region is now kept. What must not come back is "Home".
+    """
+    places, remote, _ = extract(raw)
+    assert places == expected
+    assert "Home" not in places
+    assert remote is True
+
+
 def test_a_real_office_survives_a_home_based_sibling():
     places, remote, _ = extract("Home based - EMEA; Office Based - London, UK")
-    assert places == ["London", "United Kingdom"]
+    assert places == ["EMEA", "London", "United Kingdom"]
     assert remote is True
 
 

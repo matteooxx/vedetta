@@ -29,11 +29,17 @@ project is organised against.
 from __future__ import annotations
 
 import re
-import unicodedata
+
+from . import regions as regions_mod
+from .regions import fold as _fold
 
 # A spaced dash separates places ("Ireland - Dublin Hub"); an unspaced one is part of
 # a name ("Saint-Denis"), so only the spaced form splits.
-SPLIT = re.compile(r"[;/|•]|,|\s[-–—]\s|\sor\s|\sand\s", re.I)
+# A dot between a letter and a capitalised word separates a country code from a city
+# ("IND.Pune", "MEX.Mexico City"). A dot followed by a space does not, or "St. Louis"
+# would come apart.
+SPLIT = re.compile(r"[;/|•]|,|\s[-–—]\s|\sor\s|\sand\s|(?<=[A-Za-z])\.(?=[A-Z])",
+                   re.I)
 PARENS = re.compile(r"[()\[\]]")
 WS = re.compile(r"\s+")
 
@@ -84,6 +90,25 @@ ALIASES = {
     "il": "Israel", "ae": "United Arab Emirates", "uae": "United Arab Emirates",
     "za": "South Africa", "cn": "China", "hk": "Hong Kong", "kr": "South Korea",
     "eu": "European Union",
+    # Spellings seen live that the title-casing path cannot reach.
+    "turkiye": "Turkey", "korea": "South Korea",
+    "republic of korea": "South Korea", "korea republic of": "South Korea",
+    "viet nam": "Vietnam", "czech": "Czechia",
+    # Three-letter country codes, which arrive glued to a city on some platforms:
+    # "IND.Pune", "MEX.Mexico City". Ambiguous ones are left out - MAR is Morocco
+    # and also the start of half a dozen city names.
+    "ind": "India", "mex": "Mexico", "gbr": "United Kingdom", "deu": "Germany",
+    "fra": "France", "esp": "Spain", "ita": "Italy", "irl": "Ireland",
+    "nld": "Netherlands", "pol": "Poland", "bra": "Brazil", "chn": "China",
+    "jpn": "Japan", "aus": "Australia", "phl": "Philippines", "mys": "Malaysia",
+    "sgp": "Singapore", "kor": "South Korea", "isr": "Israel",
+    "are": "United Arab Emirates", "zaf": "South Africa", "che": "Switzerland",
+    "aut": "Austria", "swe": "Sweden", "dnk": "Denmark", "nor": "Norway",
+    "fin": "Finland", "cze": "Czechia", "rou": "Romania", "hun": "Hungary",
+    "bgr": "Bulgaria", "grc": "Greece", "prt": "Portugal", "bel": "Belgium",
+    "lux": "Luxembourg", "ury": "Uruguay", "arg": "Argentina", "chl": "Chile",
+    "col": "Colombia", "per": "Peru", "tha": "Thailand", "idn": "Indonesia",
+    "vnm": "Vietnam", "pak": "Pakistan", "egy": "Egypt", "sau": "Saudi Arabia",
 }
 
 # The same countries in the languages the watched boards actually answer in.
@@ -158,33 +183,16 @@ ALIASES.update({
     "wloch": "Italy", "austria pl": "Austria",
 })
 
+# Every country name the region tables know, for the whole-fragment check below.
+#
+# Without it the token loop takes "South Africa" apart, discards "south" as a
+# direction word and leaves a place called "Africa" - and now that Africa is a region
+# name, that was about to start deciding continents. "South Korea" became "Korea" the
+# same way and then matched nothing at all.
+KNOWN_COUNTRIES = {name.lower(): name for name in regions_mod.ALL_COUNTRIES}
+
 # Cities worth keeping even when they arrive glued to a country code, e.g. "GB-London".
 GLUED = re.compile(r"^([A-Z]{2})[-–](.+)$")
-
-
-_UNDECOMPOSABLE = str.maketrans({
-    "ł": "l", "Ł": "L", "ø": "o", "Ø": "O", "đ": "d", "Đ": "D",
-    "ß": "ss", "æ": "ae", "Æ": "AE", "œ": "oe", "Œ": "OE", "þ": "th",
-    "ð": "d", "ı": "i", "ʼ": "'",
-})
-
-
-def _fold(text: str) -> str:
-    """Strip accents for lookup purposes only.
-
-    The key built below removes everything outside a-z, so without this
-    "Etats-Unis d'Amerique" arrives as "tats unis d am rique" and matches nothing -
-    an accented country name was unreachable however many aliases were listed. The
-    display name is taken from the original text, so folding never reaches what the
-    reader sees: "Zurich" is matched, "Zürich" is shown.
-
-    A handful of letters do not decompose at all under NFKD - Polish ł, Nordic ø and
-    å-as-aa, German ß - so they are translated first. Without that, "Włochy" (Italy,
-    in Polish) reduces to "w ochy" and no alias can reach it.
-    """
-    text = text.translate(_UNDECOMPOSABLE)
-    return "".join(c for c in unicodedata.normalize("NFKD", text)
-                   if not unicodedata.combining(c))
 
 
 def _clean(fragment: str) -> str:
@@ -200,13 +208,25 @@ def _canonical(fragment: str) -> str | None:
         return None
     lowered = re.sub(r"[^a-z\s]", " ", _fold(text).lower())
     lowered = WS.sub(" ", lowered).strip()
-    if not lowered or lowered in NOISE:
+    if not lowered:
         return None
     # "2 Locations", "3 offices" and similar carry no place at all.
     if re.fullmatch(r"\d+\s*\w*", lowered):
         return None
     if lowered in ALIASES:
         return ALIASES[lowered]
+    if lowered in KNOWN_COUNTRIES:
+        return KNOWN_COUNTRIES[lowered]
+    # A region is a place, not noise. 63 postings in the watched population give no
+    # place at all, only a region - "Home based - Worldwide", "Home Based - APAC" -
+    # and they were being discarded here, which left them unfilterable and
+    # unjudgeable. Checked after the aliases so nothing that already resolved to a
+    # country changes meaning.
+    group = regions_mod.canonical_group(lowered)
+    if group is not None:
+        return group
+    if lowered in NOISE:
+        return None
     # Title-case, but leave an already-capitalised token alone so acronyms survive.
     def cap(word: str) -> str:
         if word.isupper():
@@ -233,6 +253,11 @@ def _places_in(fragment: str) -> list[str]:
     whole = WS.sub(" ", re.sub(r"[^a-z\s]", " ", _fold(text).lower())).strip()
     if whole in ALIASES:
         return [ALIASES[whole]]
+    if whole in KNOWN_COUNTRIES:
+        return [KNOWN_COUNTRIES[whole]]
+    group = regions_mod.canonical_group(whole)
+    if group is not None:
+        return [group]
     if not whole or whole in NOISE or re.fullmatch(r"\d+\s*\w*", whole):
         return []
     if len(whole.replace(" ", "")) < 2:
@@ -246,6 +271,10 @@ def _places_in(fragment: str) -> list[str]:
             continue
         if key in ALIASES:
             canonical = ALIASES[key]
+            if canonical not in out:
+                out.append(canonical)
+        elif regions_mod.canonical_group(key) is not None:
+            canonical = regions_mod.canonical_group(key)
             if canonical not in out:
                 out.append(canonical)
         elif key in NOISE:

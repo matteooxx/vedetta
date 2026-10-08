@@ -22,6 +22,7 @@ import re
 from dataclasses import dataclass, field
 
 from . import places as places_mod
+from . import regions as regions_mod
 from .labels.engine import Label
 
 SPLIT = re.compile(r"[;/|]|,\s*(?=[A-Z])|\s+(?:and|or)\s+", re.I)
@@ -30,6 +31,29 @@ PARENS = re.compile(r"[()\[\]]")
 # Verdict strength, strongest first. A multi-location posting takes the best of its
 # locations: one workable office is enough to make the posting workable.
 ORDER = ("preferred", "acceptable", "conditional", "excluded")
+
+
+def _text_match(target: str, text: str) -> bool:
+    """Substring for an ordinary place name, whole word for a short one.
+
+    Substring matching is what makes "Ireland" catch "Remote - Ireland" and "Dublin"
+    catch "Dublin Hub", and it is worth keeping. It stops being safe below about four
+    characters: "US" is inside "Prussia" and "EU" is inside "Eusebio".
+    """
+    if len(target) > 3:
+        return target in text
+    return re.search(rf"(?<![a-z]){re.escape(target)}(?![a-z])", text) is not None
+
+
+def _at_most_acceptable(bucket: str) -> str:
+    """A verdict derived from a region never reaches the top bucket.
+
+    `preferred` means the posting is in a place the reader wants to be. A posting
+    open to all of EMEA is not in Dublin; it would simply allow Dublin. Reporting it
+    as preferred would put it at the top of the digest on a claim the posting never
+    made.
+    """
+    return "acceptable" if bucket == "preferred" else bucket
 
 
 @dataclass
@@ -77,12 +101,21 @@ class Profile:
 
     # --------------------------------------------------------------- location
     def location_verdict(self, location: str | None) -> tuple[str, str | None]:
-        """Return (verdict, the fragment that decided it).
+        """Return (verdict, what decided it).
 
         Multi-location postings are common and are written half a dozen ways:
         "Remote, Canada; Remote, United Kingdom", "United States (Remote)",
-        "GB-London", "2 Locations". Each fragment is judged and the **best** verdict
-        wins, because one workable office makes the posting workable.
+        "GB-London", "Home Based - APAC; Home based - EMEA". Each fragment is judged
+        and the **best** verdict wins, because one workable office makes the posting
+        workable.
+
+        Within one fragment the **most specific** match wins instead, which matters
+        as soon as a rule can name a whole region. A profile saying `Europe` is
+        acceptable and `United Kingdom` is conditional has to read a London posting
+        as conditional: without that, the broad rule would silently erase the visa
+        warning on the narrow one. Specificity is scored in two parts - whether the
+        platform stated the place or this module inferred it, and whether the rule
+        names the place itself or a region containing it.
 
         An unrecognised or missing location is `unknown`, never `excluded`. Guessing
         it away would be the silent-drop failure in miniature.
@@ -95,13 +128,18 @@ class Profile:
         if not fragments:
             fragments = [text.strip()]
 
-        best, matched = None, None
+        best, matched, best_specificity = None, None, -1
         for fragment in fragments:
-            verdict, hit = self._judge_fragment(fragment)
+            verdict, hit, specificity = self._judge_fragment(fragment)
             if verdict is None:
                 continue
-            if best is None or ORDER.index(verdict) < ORDER.index(best):
-                best, matched = verdict, hit
+            better = best is None or ORDER.index(verdict) < ORDER.index(best)
+            # On a tie, the fragment that needed less inference explains it. Both
+            # fragments of "Milan, Italy" say acceptable; the label should read
+            # "Italy", not "Italy, inferred from Milan".
+            clearer = (verdict == best and specificity > best_specificity)
+            if better or clearer:
+                best, matched, best_specificity = verdict, hit, specificity
 
         if best is None:
             lowered = location.lower()
@@ -111,33 +149,117 @@ class Profile:
             return "unknown", None
         return best, matched
 
-    def _judge_fragment(self, fragment: str) -> tuple[str | None, str | None]:
-        """Judge one fragment, by its text and by the places in it.
+    def _judge_fragment(self, fragment: str) -> tuple[str | None, str | None, int]:
+        """Judge one fragment. Returns (verdict, what decided it, specificity).
 
-        The text alone was not enough. A profile that excludes "United States" was
-        matching "Austin, Texas, United States" and missing "Denver, Colorado, USA"
-        and "New York, US, New York" entirely - 26 postings in a country the reader
-        cannot work in sat in the workable list, because neither "US" nor "USA"
-        contains the string the profile had written.
+        Four ways a fragment can be judged, in descending order of how much is being
+        taken on trust:
 
-        So the fragment is also run through the place extractor, which already
-        collapses us, usa, U.S.A. and Etats-Unis onto one name, and the canonical
-        names are judged too. The reader keeps writing the country once, in one
-        spelling, and every spelling the platforms use reaches it.
+        4. the rule names the place and the platform stated it - "United States"
+           against "Austin, Texas, United States";
+        3. the rule names the place and this module inferred it from a city or a
+           state - "United States" against "San Francisco", which the platform never
+           said - or the platform named a region and the verdict comes from the
+           countries inside it. "EMEA" is worth the best verdict among European,
+           Middle Eastern and African countries, so a role open to all of EMEA reads
+           acceptable because it can be done from Milan. 95 postings name only a city
+           and 63 name only a region; nothing else reaches either group;
+        2. the rule names a region containing a stated place - `EU` against
+           "Bulgaria", which is how twenty-seven countries get written in one line,
+           including the ones the reader never thought to list;
+        1. the rule names a region containing an *inferred* place - `EU` against
+           Bulgaria worked out from "Sofia". Two inferences stacked, so it ranks
+           last and only decides when nothing clearer does.
+
+        The text was once matched as a raw substring and nothing else, which caught
+        "Austin, Texas, United States" and missed "Denver, Colorado, USA" entirely -
+        26 postings in a country the reader cannot work in sat in the workable list.
         """
         lowered = fragment.lower()
-        candidates = [lowered]
-        places, _, _ = places_mod.extract(fragment)
-        candidates.extend(place.lower() for place in places)
+        stated = [place for place in places_mod.extract(fragment)[0]]
+        stated_lower = {place.lower() for place in stated}
+
+        # A country this module worked out from a city or a subdivision, used only
+        # when the fragment names no country of its own. This is the one guess here
+        # that can exclude a posting, so what it was inferred from is carried into
+        # the label: an exclusion the reader cannot see the reasoning for is one they
+        # cannot argue with.
+        inferred: list[tuple[str, str]] = []
+        if not any(place in regions_mod.CITY_COUNTRY.values() for place in stated):
+            for place in stated:
+                country = regions_mod.infer_country(place)
+                if country is not None and country.lower() not in stated_lower:
+                    inferred.append((country, place))
+
+        candidates: list[tuple[int, str, str]] = []   # (specificity, verdict, hit)
         for bucket in ORDER:
             for needle in getattr(self, bucket):
                 target = needle.lower()
-                # Whole-value match on a canonical place name, substring match on
-                # the raw text: "Ireland" must not be found inside "Irelandia", but
-                # "Dublin" does have to be found inside "Dublin Hub".
-                if target in lowered or any(target == c for c in candidates[1:]):
-                    return bucket, needle
-        return None, None
+                is_group_needle = regions_mod.is_group(needle)
+                rule_countries = ({c.lower() for c in regions_mod.countries_in(needle)}
+                                  if is_group_needle else None)
+
+                # A region name is NEVER matched as a substring of the raw text.
+                # "EU" inside "Eusebio, Ceara, Brazil" made a Brazilian posting
+                # acceptable, and "EU" inside "Seoul Teugbyeolsi" did the same for
+                # Korea. A two-letter group name is a substring of a great many
+                # place names, and the rule it belongs to is the broadest in the
+                # file - the two together are how a whole continent gets let in.
+                #
+                # Short needles get a word boundary for the same reason: "US" would
+                # otherwise be found inside "Prussia".
+                if target in stated_lower or (
+                        not is_group_needle and _text_match(target, lowered)):
+                    candidates.append((4, bucket, needle))
+                    continue
+
+                for country, source in inferred:
+                    if country.lower() == target:
+                        candidates.append(
+                            (3, bucket, f"{needle}, inferred from {source}"))
+
+                # The platform named a region: judge the countries inside it. Capped
+                # at `acceptable`, because a role open to a whole region is not *in*
+                # the reader's preferred city - it merely permits it, and reporting
+                # "in a preferred location (Dublin)" for a worldwide-remote posting
+                # would be a claim the posting never made.
+                for place in stated:
+                    if not regions_mod.is_platform_region(place):
+                        continue
+                    inside = regions_mod.countries_in(place)
+                    derived = _at_most_acceptable(bucket)
+                    if any(country.lower() == target for country in inside):
+                        candidates.append((3, derived, f"{needle}, via {place}"))
+                    elif rule_countries is not None and (
+                            rule_countries & {c.lower() for c in inside}):
+                        # A region on both sides: APAC in the posting against Asia in
+                        # the profile. Neither names a country, so nothing above
+                        # catches it, and these are a third of the postings this
+                        # whole feature exists for.
+                        candidates.append((2, derived, f"{needle}, via {place}"))
+
+                # The rule named a region: does it contain anything here?
+                if rule_countries is not None:
+                    for place in stated:
+                        if place.lower() in rule_countries:
+                            candidates.append((2, bucket, f"{needle}, via {place}"))
+                    for country, source in inferred:
+                        if country.lower() in rule_countries:
+                            # One below a stated place matched the same way: both
+                            # are a region rule, but one of them took a city on
+                            # trust. "Austin, Texas, United States" should explain
+                            # itself through the country the platform printed, not
+                            # through the city this module looked up.
+                            candidates.append(
+                                (1, bucket, f"{needle}, via {country} "
+                                            f"inferred from {source}"))
+
+        if not candidates:
+            return None, None, 0
+        # Most specific first; among equals, the better verdict.
+        candidates.sort(key=lambda c: (-c[0], ORDER.index(c[1])))
+        specificity, verdict, hit = candidates[0]
+        return verdict, hit, specificity
 
     # ------------------------------------------------------------------ level
     def level_verdict(self, title: str | None) -> tuple[str | None, str | None]:

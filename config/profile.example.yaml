@@ -34,11 +34,55 @@ experience:
 locations:
   # A posting usually lists several locations, written half a dozen ways:
   # "Remote, Canada; Remote, United Kingdom", "United States (Remote)",
-  # "GB-London", "2 Locations". Each is judged and the BEST verdict wins, because
-  # one workable office makes the posting workable.
+  # "GB-London", "Home Based - APAC; Home based - EMEA", "2 Locations". Each is
+  # judged and the BEST verdict wins, because one workable office makes the posting
+  # workable. Within ONE location the most SPECIFIC rule wins instead - see the note
+  # on regions below.
   #
-  # Matching is case-insensitive substring, so "Ireland" catches "Dublin, Ireland"
-  # and "Remote - Ireland".
+  # Four ways a rule can match, and the first two need no explanation:
+  #
+  #   1. the name as written, case-insensitive substring: "Ireland" catches
+  #      "Dublin, Ireland" and "Remote - Ireland".
+  #   2. the same country spelled another way. "United States" also catches "USA",
+  #      "US" and "Etats-Unis d'Amerique", so you write the country once.
+  #   3. a country worked out from a city or a state, where the posting names no
+  #      country at all - "San Francisco, California" is in the United States. The
+  #      label says so: "outside where you can work (United States, inferred from
+  #      San Francisco)". Cities whose name belongs to more than one country -
+  #      London, Birmingham, Cambridge, Perth - are never resolved this way. Name
+  #      them here yourself if they matter to you.
+  #   4. a REGION, below.
+  #
+  # ---------------------------------------------------------------- regions
+  #
+  # Any of these can be written instead of a country, and stands for the countries
+  # in it:
+  #
+  #   legal     EU (27)  EEA  Schengen
+  #   continent Europe  North America  South America  Americas  Asia
+  #             Middle East  Africa  Oceania
+  #
+  # `EU` is worth doing even if you plan to list countries by hand, because it
+  # includes the ones you would forget. The list this file replaced named
+  # thirty-nine countries and still missed Greece, Hungary and Bulgaria, which
+  # therefore arrived as "location unclear" and counted as workable.
+  #
+  # Pick the one that matches your situation rather than the one that reads best.
+  # For an EU citizen the boundary is legal: `EU` or `EEA`, not `Europe`, because
+  # Europe includes the United Kingdom and Switzerland, where you would need
+  # sponsorship. Those two belong under `conditional`, by name.
+  #
+  # A SPECIFIC RULE BEATS A REGION. With `EU` acceptable and `United Kingdom`
+  # conditional, a London posting reads conditional. Without that the broad rule
+  # would erase the visa warning on the narrow one, and you would apply for a job
+  # needing sponsorship without knowing it.
+  #
+  # Postings also use regions, and there the verdict is DERIVED rather than
+  # configured: a region is worth the best verdict among the countries in it. A role
+  # advertised for all of EMEA can be done from Milan, so it reads acceptable; APAC
+  # contains nothing acceptable to you, so it reads excluded. One thing a region can
+  # never do is reach `preferred`: a worldwide-remote role is not IN Dublin, it
+  # merely allows it.
 
   preferred: [Dublin, Ireland]
 
