@@ -46,13 +46,36 @@ CREATE TABLE IF NOT EXISTS source (
 );
 
 CREATE TABLE IF NOT EXISTS run (
-  id          INTEGER PRIMARY KEY,
-  started_at  TEXT NOT NULL,
-  finished_at TEXT,
-  trigger     TEXT NOT NULL DEFAULT 'manual',
-  seeding     INTEGER NOT NULL DEFAULT 0,
-  digest_sent INTEGER NOT NULL DEFAULT 0
+  id           INTEGER PRIMARY KEY,
+  started_at   TEXT NOT NULL,
+  finished_at  TEXT,
+  trigger      TEXT NOT NULL DEFAULT 'manual',
+  seeding      INTEGER NOT NULL DEFAULT 0,
+  digest_sent  INTEGER NOT NULL DEFAULT 0,
+  -- running | finished | failed. A run started from the interface happens in a
+  -- background thread, so the page that started it needs a way to ask how it is
+  -- going instead of waiting minutes for an HTTP response.
+  state        TEXT NOT NULL DEFAULT 'finished',
+  -- Touched as the run works. A `running` row whose heartbeat has gone cold means
+  -- the process died mid-run, which is a different thing from still working and has
+  -- to look different.
+  heartbeat_at TEXT,
+  error        TEXT
 );
+
+-- What a run is doing, appended as it goes. A count of finished sources answers
+-- "how far along", but not "what is it doing now" - and on a source with 465 detail
+-- pages to read, that is the only question worth asking.
+CREATE TABLE IF NOT EXISTS run_event (
+  id     INTEGER PRIMARY KEY,
+  run_id INTEGER NOT NULL REFERENCES run(id) ON DELETE CASCADE,
+  at     TEXT NOT NULL,
+  kind   TEXT NOT NULL,            -- source | progress | note | error
+  detail TEXT NOT NULL,
+  done   INTEGER,                  -- for progress: items completed
+  total  INTEGER                   -- for progress: items expected, when known
+);
+CREATE INDEX IF NOT EXISTS run_event_run ON run_event(run_id, id);
 
 CREATE TABLE IF NOT EXISTS source_poll (
   id          INTEGER PRIMARY KEY,
@@ -182,6 +205,11 @@ CREATE TABLE IF NOT EXISTS tracker_match (
 # is the only kind allowed here - a destructive migration on a database holding the
 # operator's triage decisions is not something a start-up path should be able to do.
 MIGRATIONS = {
+    "run": {
+        "state": "TEXT NOT NULL DEFAULT 'finished'",
+        "heartbeat_at": "TEXT",
+        "error": "TEXT",
+    },
     "posting": {
         "workable": "INTEGER NOT NULL DEFAULT 1",
         "blocked_by": "TEXT",

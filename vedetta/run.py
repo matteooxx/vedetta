@@ -32,12 +32,28 @@ ADAPTERS = {
 
 
 def start_run(conn, trigger: str, seeding: bool) -> int:
+    stamp = now_iso()
     cur = conn.execute(
-        "INSERT INTO run (started_at, trigger, seeding) VALUES (?,?,?)",
-        (now_iso(), trigger, int(seeding)),
+        """INSERT INTO run (started_at, trigger, seeding, state, heartbeat_at)
+           VALUES (?,?,?,'running',?)""",
+        (stamp, trigger, int(seeding), stamp),
     )
     conn.commit()
     return cur.lastrowid
+
+
+def finish_run(conn, run_id: int, state: str = "finished",
+               error: str | None = None) -> None:
+    """Close the run row out.
+
+    Always called, including on failure: a run left marked `running` forever is
+    indistinguishable from one still working, and the interface would send the reader
+    back to watch nothing.
+    """
+    conn.execute(
+        "UPDATE run SET finished_at=?, state=?, error=?, heartbeat_at=? WHERE id=?",
+        (now_iso(), state, error, now_iso(), run_id))
+    conn.commit()
 
 
 def verified_sources(conn) -> list[dict]:
@@ -81,7 +97,8 @@ def known_keys(conn, source_id: int) -> set[str]:
         "SELECT DISTINCT platform_key FROM sighting WHERE source_id=?", (source_id,))}
 
 
-def poll(conn, run_id: int, source: dict, seeding: bool = False) -> tuple[str, list]:
+def poll(conn, run_id: int, source: dict, seeding: bool = False,
+         reporter=None) -> tuple[str, list]:
     platform = source["platform"]
     adapter_cls = ADAPTERS.get(platform)
     if adapter_cls is None:
@@ -103,10 +120,18 @@ def poll(conn, run_id: int, source: dict, seeding: bool = False) -> tuple[str, l
         # carries everything ignore them. No detail budget on a first pass: the whole
         # board has to be recorded once, or its remainder would arrive as "new"
         # tomorrow and be mailed as news when it is in fact history.
+        on_progress = None
+        if reporter is not None:
+            employer = source["employer_name"]
+
+            def on_progress(done, total=None, what="postings"):
+                reporter.progress(employer, done, total, what)
+
         items = adapter_cls().fetch(
             source,
             known_keys=known_keys(conn, source["id"]),
             detail_budget=None if seeding else 150,
+            progress=on_progress,
         )
     except AdapterError as exc:
         _record_poll(conn, run_id, source["id"], "error", exc.http_status, None,
@@ -336,12 +361,33 @@ def is_seeding_source(conn, source_id: int) -> bool:
     return row is None
 
 
-def execute(conn, config, trigger: str = "manual", force_seed: bool = False) -> dict:
+def execute(conn, config, trigger: str = "manual", force_seed: bool = False,
+            reporter=None) -> dict:
+    """Create a run row and carry it out."""
     sources = verified_sources(conn)
-    seeding_sources = {s["id"] for s in sources if force_seed or is_seeding_source(conn, s["id"])}
+    seeding_sources = {s["id"] for s in sources
+                       if force_seed or is_seeding_source(conn, s["id"])}
     seeding = bool(sources) and len(seeding_sources) == len(sources)
-
     run_id = start_run(conn, trigger, seeding)
+    return execute_in(conn, config, run_id, reporter=reporter,
+                      force_seed=force_seed)
+
+
+def execute_in(conn, config, run_id: int, reporter=None,
+               force_seed: bool = False) -> dict:
+    """Carry out a run whose row already exists.
+
+    Split out because the interface creates the run row first, in the request, so it
+    can redirect the reader to a progress page before the work starts. Without that
+    the page could not name the run it was supposed to be watching.
+    """
+    sources = verified_sources(conn)
+    seeding_sources = {s["id"] for s in sources
+                       if force_seed or is_seeding_source(conn, s["id"])}
+    seeding = bool(sources) and len(seeding_sources) == len(sources)
+    conn.execute("UPDATE run SET seeding=? WHERE id=?", (int(seeding), run_id))
+    conn.commit()
+
     engine = RuleEngine(config.rules)
     profile = config.profile
     matcher = SkillMatcher(config.profile_doc)
@@ -353,9 +399,13 @@ def execute(conn, config, trigger: str = "manual", force_seed: bool = False) -> 
         "unwatched": unwatched(conn),
     }
 
-    for source in sources:
+    for index, source in enumerate(sources, 1):
+        if reporter is not None:
+            reporter.source(source["employer_name"], source["platform"],
+                            index, len(sources))
         outcome, items = poll(conn, run_id, source,
-                              seeding=source["id"] in seeding_sources)
+                              seeding=source["id"] in seeding_sources,
+                              reporter=reporter)
         report["polls"].append({
             "employer": source["employer_name"], "platform": source["platform"],
             "outcome": outcome, "count": len(items),
@@ -406,8 +456,10 @@ def execute(conn, config, trigger: str = "manual", force_seed: bool = False) -> 
             reasons[reason] = reasons.get(reason, 0) + 1
     report["excluded_reasons"] = dict(sorted(reasons.items(), key=lambda kv: -kv[1]))
 
-    conn.execute("UPDATE run SET finished_at=? WHERE id=?", (now_iso(), run_id))
-    conn.commit()
+    if reporter is not None:
+        reporter.note(f"{len(report['new'])} new, {len(report['excluded'])} excluded, "
+                      f"{len(report['seeded'])} seeded")
+    finish_run(conn, run_id, "finished")
     return report
 
 

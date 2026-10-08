@@ -36,7 +36,8 @@ class WorkdayAdapter(Adapter):
     platform = "workday"
 
     def fetch(self, source: dict, known_keys: set[str] | None = None,
-              detail_budget: int | None = None) -> list[RawPosting]:
+              detail_budget: int | None = None,
+              progress=None) -> list[RawPosting]:
         endpoint = source.get("endpoint")
         if not endpoint:
             raise AdapterError(
@@ -48,9 +49,13 @@ class WorkdayAdapter(Adapter):
         public = _public_base(endpoint)
 
         with self.client() as client:
+            if progress is not None:
+                progress(0, None, "listing postings")
             postings = self._list(client, endpoint)
             out: list[RawPosting] = []
             spent = 0
+            to_read = sum(1 for e in postings
+                          if (e.get("externalPath") or "") not in known)
             for entry in postings:
                 path = entry.get("externalPath") or ""
                 key = path or str(entry.get("bulletFields") or entry.get("title"))
@@ -87,6 +92,8 @@ class WorkdayAdapter(Adapter):
                     text=" \n".join(p for p in parts if p),
                     raw=entry,
                 ))
+                if progress is not None and spent:
+                    progress(spent, to_read, "adverts read")
         return out
 
     # -------------------------------------------------------------------- listing

@@ -48,7 +48,8 @@ class SitemapAdapter(Adapter):
     platform = "sitemap"
 
     def fetch(self, source: dict, known_keys: set[str] | None = None,
-              detail_budget: int | None = 150) -> list[RawPosting]:
+              detail_budget: int | None = 150,
+              progress=None) -> list[RawPosting]:
         """Return one posting per job URL.
 
         ``known_keys`` are URLs already recorded for this source: they are emitted
@@ -69,6 +70,8 @@ class SitemapAdapter(Adapter):
         exclude = re.compile(source["job_url_exclude"]) if source.get("job_url_exclude") else None
 
         with self.client() as client:
+            if progress is not None:
+                progress(0, None, "reading the sitemap")
             urls = self._collect(client, host_url, origin)
             job_urls = [u for u in urls
                         if include.search(u) and not (exclude and exclude.search(u))]
@@ -80,6 +83,9 @@ class SitemapAdapter(Adapter):
 
             out: list[RawPosting] = []
             spent = 0
+            # Only the pages actually fetched are worth counting: the known ones cost
+            # nothing, so including them would make a slow run look fast.
+            to_read = sum(1 for u in job_urls if u not in known)
             for url in job_urls:
                 if url in known:
                     # Already recorded. Emitted so the posting is not treated as
@@ -95,6 +101,8 @@ class SitemapAdapter(Adapter):
                 posting = self._read_detail(client, url)
                 if posting is not None:
                     out.append(posting)
+                if progress is not None:
+                    progress(spent, to_read, "job pages read")
                 time.sleep(POLITE_DELAY)
         return out
 

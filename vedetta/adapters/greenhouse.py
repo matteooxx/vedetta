@@ -22,9 +22,11 @@ class GreenhouseAdapter(Adapter):
     platform = "greenhouse"
 
     def fetch(self, source: dict, known_keys: set[str] | None = None,
-              detail_budget: int | None = None) -> list[RawPosting]:
-        # The board listing already carries the description, so neither
-        # argument applies: one request returns everything.
+              detail_budget: int | None = None,
+              progress=None) -> list[RawPosting]:
+        # The board listing already carries the description, so the budget and the
+        # known keys do not apply: one request returns everything. There is nothing
+        # to report progress through either, only a total at the end.
         identifier = source["identifier"]
         url = source.get("endpoint") or BASE.format(identifier=identifier)
         # content=true returns the description, which the rule engine needs to see
@@ -71,6 +73,8 @@ class GreenhouseAdapter(Adapter):
                     raw=job,
                 )
             )
+        if progress is not None:
+            progress(len(out), len(out))
         return out
 
 

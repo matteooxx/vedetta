@@ -83,6 +83,25 @@ def test_triage_rejects_an_unknown_stage(client):
     assert client.post("/postings/1/triage", data={"state": "elsewhere"}).status_code == 400
 
 
+def test_a_run_page_for_an_unknown_run_is_a_404(client):
+    assert client.get("/runs/9999").status_code == 404
+
+
+def test_run_now_returns_immediately_and_points_at_a_progress_page(client):
+    """A run takes anything from a second to an hour, so the request must not wait
+    for it. The browser used to sit on a white page with no way to tell a slow run
+    from a dead one."""
+    response = client.post("/run")
+    assert response.status_code == 302
+    assert "/runs/" in response.headers["Location"]
+
+
+def test_the_progress_page_renders(client):
+    location = client.post("/run").headers["Location"]
+    body = client.get(location).data.decode("utf-8", "ignore")
+    assert "What it is doing" in body
+
+
 def test_health_reports_the_database(client):
     import json
     payload = json.loads(client.get("/health").data)

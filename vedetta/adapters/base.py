@@ -63,7 +63,8 @@ class Adapter:
         )
 
     def fetch(self, source: dict, known_keys: set[str] | None = None,
-              detail_budget: int | None = None) -> list[RawPosting]:  # pragma: no cover
+              detail_budget: int | None = None,
+              progress=None) -> list[RawPosting]:  # pragma: no cover
         """Return one posting per opening on this source.
 
         ``known_keys`` are the platform keys already recorded for this source. An
@@ -76,7 +77,12 @@ class Adapter:
         there would leave the remainder to arrive as "new" tomorrow and be mailed as
         news when it is in fact history.
 
-        An adapter whose listing already carries everything ignores both.
+        ``progress`` is called as ``progress(done, total, what)`` while the adapter
+        works. It matters on the slow ones: a source with 465 detail pages to read
+        otherwise reports nothing for twenty minutes, which from outside is
+        indistinguishable from being stuck.
+
+        An adapter whose listing already carries everything ignores all three.
         """
         raise NotImplementedError
 

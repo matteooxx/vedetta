@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -21,6 +22,8 @@ from .. import config as config_mod
 from .. import configstore
 from .. import facets
 from .. import insights as insights_mod
+from .. import progress as progress_mod
+from ..digest import outbox
 from .. import triage as triage_mod
 from .. import db as db_mod
 from .. import run as run_mod
@@ -81,6 +84,22 @@ def create_app() -> Flask:
 
     def open_db(cfg):
         return db_mod.connect(cfg.db_path)
+
+    @app.context_processor
+    def running_banner():
+        """A run in progress, surfaced on every page.
+
+        Somebody who starts a run and navigates away should not have to remember
+        where they left it.
+        """
+        try:
+            cfg = config_mod.load(ROOT, str(CONFIG_DIR))
+            conn = db_mod.connect(cfg.db_path)
+            active = progress_mod.latest_running(conn)
+            conn.close()
+        except Exception:
+            active = None
+        return {"active_run": active}
 
     # ------------------------------------------------------------------ dashboard
     @app.route("/")
@@ -246,29 +265,77 @@ def create_app() -> Flask:
     # ------------------------------------------------------------------- run now
     @app.post("/run")
     def run_now():
+        """Start a run in the background and send the reader to watch it.
+
+        A run takes anything from a second to an hour, so blocking the request on it
+        was never going to work: the browser sat on a white page with no way to tell a
+        slow run from a dead one. It now returns immediately and the progress page
+        answers "how is it going" from the database.
+        """
         cfg = load_config()
         conn = open_db(cfg)
         config_mod.sync_watchlist(conn, cfg.watchlist)
-        lock_path = Path(cfg.db_path).parent / "run.lock"
-        try:
-            with acquire(lock_path, owner="web-ui"):
-                report = run_mod.execute(conn, cfg, trigger="manual")
-        except RunInProgress as exc:
-            conn.close()
-            flash(str(exc), "warn")
-            return redirect(url_for("dashboard"))
         conn.close()
-        new = len(report["new"])
-        seeded = len(report.get("seeded") or [])
-        failed = sum(1 for p in report["polls"] if p["outcome"] == "error")
-        parts = [f"{new} new"] if new else ["nothing new"]
-        if seeded:
-            parts.append(f"{seeded} seeded")
-        if failed:
-            parts.append(f"{failed} source(s) failed")
-        flash("Run finished: " + ", ".join(parts)
-              + ". No mail was sent from here - the scheduled run does that.", "ok")
-        return redirect(url_for("dashboard"))
+
+        lock_path = Path(cfg.db_path).parent / "run.lock"
+        started: dict = {}
+        ready = threading.Event()
+
+        def work():
+            # Its own connection: SQLite objects do not cross threads, and the
+            # progress reader needs to get in while this is working.
+            inner = db_mod.connect(cfg.db_path)
+            try:
+                with acquire(lock_path, owner="web-ui"):
+                    run_id = run_mod.start_run(inner, "manual", False)
+                    started["run_id"] = run_id
+                    ready.set()
+                    reporter = progress_mod.Reporter(cfg.db_path, run_id)
+                    try:
+                        run_mod.execute_in(inner, cfg, run_id, reporter=reporter)
+                    except Exception as exc:
+                        # Recorded on the run, not only in a log: a run that died has
+                        # to say so on the page the reader is already watching.
+                        reporter.error(f"{type(exc).__name__}: {exc}")
+                        run_mod.finish_run(inner, run_id, "failed",
+                                           f"{type(exc).__name__}: {exc}")
+            except RunInProgress as exc:
+                started["busy"] = str(exc)
+                ready.set()
+            finally:
+                inner.close()
+                ready.set()
+
+        threading.Thread(target=work, daemon=True, name="vedetta-run").start()
+        # Waited on briefly so the redirect can name the run. If the lock is held the
+        # thread says so and this returns just as fast.
+        ready.wait(timeout=10)
+
+        if started.get("busy"):
+            flash(started["busy"], "warn")
+            return redirect(url_for("dashboard"))
+        run_id = started.get("run_id")
+        if run_id is None:
+            flash("The run was started but has not reported in yet. The progress page "
+                  "will show it once it does.", "warn")
+            return redirect(url_for("dashboard"))
+        return redirect(url_for("run_progress", run_id=run_id))
+
+    @app.route("/runs/<int:run_id>")
+    def run_progress(run_id: int):
+        cfg = load_config()
+        conn = open_db(cfg)
+        snap = progress_mod.snapshot(conn, run_id)
+        conn.close()
+        if snap is None:
+            abort(404)
+        # Whether this run's digest is still waiting to go out. A run started from
+        # here queues the digest; the scheduled run delivers it, because the mail
+        # transport belongs to the host and not to this container. Worth saying on
+        # the page rather than leaving the reader to wonder where the email went.
+        queued = any(item.run_id == run_id
+                     for item in outbox.pending(cfg.db_path))
+        return render_template("run.html", snap=snap, queued=queued)
 
     @app.post("/relabel")
     def relabel_now():

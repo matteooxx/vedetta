@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% set active = 'dash' %}
+{% block title %}Run {{ snap.run_id }} · Vedetta{% endblock %}
+
+{% block head_extra %}
+{# Refreshed by the browser rather than by script: it works with JavaScript off, it
+   cannot leak a timer, and the page is cheap. It stops once the run is over so a tab
+   left open does not poll forever. #}
+{% if snap.live %}<meta http-equiv="refresh" content="4">{% endif %}
+{% endblock %}
+
+{% block body %}
+<h1>Run {{ snap.run_id }}</h1>
+
+{% if snap.state == 'running' %}
+<p class="lede">In progress. This page refreshes itself every few seconds; you can
+close it and the run carries on.</p>
+{% elif snap.state == 'finished' %}
+<p class="lede">Finished{% if snap.seconds %} in {{ snap.seconds }}&nbsp;seconds{% endif %}.</p>
+{% elif snap.state == 'interrupted' %}
+<p class="lede">This run stopped reporting and is presumed dead — the process was
+probably restarted mid-run. Nothing is corrupted: postings already recorded are kept,
+and the next run picks up where this one left off.</p>
+{% else %}
+<p class="lede">This run failed.</p>
+{% endif %}
+
+<div class="progress" role="group" aria-label="Progress">
+  <div class="bar" role="img"
+       aria-label="{{ snap.sources_done }} of {{ snap.sources_total }} sources polled">
+    <span class="fill{{ ' live' if snap.live }}" style="width: {{ snap.percent }}%"></span>
+  </div>
+  <p class="progress-line">
+    <strong>{{ snap.sources_done }}</strong> of <strong>{{ snap.sources_total }}</strong>
+    sources &middot; {{ snap.percent }}%
+    {% if snap.seconds is not none %}&middot; {{ snap.seconds }}s elapsed{% endif %}
+  </p>
+</div>
+
+{% if snap.current %}
+<p class="current"><span class="spinner{{ ' live' if snap.live }}" aria-hidden="true"></span>
+  {{ snap.current }}</p>
+{% endif %}
+
+{% if snap.error %}
+<div class="flash error"><strong>The run failed.</strong> {{ snap.error }}</div>
+{% endif %}
+
+<div class="grid" style="margin-top:16px">
+  {% for key, label, tone in [('ok','Answered','positive'), ('empty','Returned nothing','warning'), ('error','Failed','blocking')] %}
+  <div class="tile">
+    <div class="n {{ tone if snap.outcomes.get(key) else '' }}">{{ snap.outcomes.get(key, 0) }}</div>
+    <div class="k">{{ label }}</div>
+  </div>
+  {% endfor %}
+  <div class="tile">
+    <div class="n">{{ snap.sources_total - snap.sources_done }}</div>
+    <div class="k">Still to go</div>
+  </div>
+</div>
+
+<h2>What it is doing</h2>
+{% if snap.events %}
+<table>
+  <caption>Most recent first. A source with hundreds of job pages to read reports as it
+  goes, because otherwise twenty silent minutes look exactly like being stuck.</caption>
+  <thead><tr><th>When</th><th>Step</th><th>Detail</th></tr></thead>
+  <tbody>
+  {% for e in snap.events %}
+  <tr>
+    <td class="small muted mono">{{ e.at[11:19] if e.at and e.at|length > 18 else e.at }}</td>
+    <td class="small {{ 'blocking' if e.kind == 'error' else '' }}">{{ e.kind }}</td>
+    <td class="small">{{ e.detail }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="empty"><p><strong>Nothing reported yet.</strong></p>
+  <p class="small">The first source has not finished. Greenhouse boards answer in a
+    second; a sitemap source reads one job page at a time and takes minutes.</p></div>
+{% endif %}
+
+{% if queued %}
+<div class="note">
+  <strong>The digest for this run is queued, not sent.</strong> Mail goes out through
+  the machine's own configuration, which only the scheduled run can reach — so this
+  one will be delivered at the next scheduled run rather than now. That also means a
+  delivery that fails is retried instead of lost.
+</div>
+{% endif %}
+
+<div class="row" style="margin-top:20px">
+  <a href="{{ url_for('dashboard') }}">Dashboard</a>
+  {% if not snap.live %}
+  <a href="{{ url_for('postings') }}">See the postings</a>
+  {% endif %}
+</div>
+{% endblock %}

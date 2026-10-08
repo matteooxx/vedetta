@@ -26,7 +26,8 @@ find out whether it ran and what it saw.</p>
 
 <h2>Last run</h2>
 {% if last %}
-<p class="small muted">Run <strong>{{ last.id }}</strong>
+<p class="small muted"><a href="{{ url_for('run_progress', run_id=last.id) }}">Run
+  <strong>{{ last.id }}</strong></a>
   &middot; {{ last.started_at | when }}
   &middot; {{ 'finished' if last.finished_at else 'did not finish' }}
   &middot; trigger <code>{{ last.trigger }}</code>
@@ -73,7 +74,9 @@ visible &mdash; leaving them out would look exactly like having nothing to repor
   (version {{ build.version }}).</p>
 {% endif %}
 <p class="small">Polls every confirmed source immediately, using the same code as the
-scheduled run. It does not send mail &mdash; the scheduled run does that.</p>
+scheduled run. It runs in the background and takes you to a page that shows how far it
+has got &mdash; a run can take a second or an hour, so you can close that page and come
+back to it.</p>
 <form method="post" action="{{ url_for('run_now') }}" id="run-form">
   <button type="submit" id="run-button">Run Now</button>
 </form>
@@ -90,7 +93,7 @@ scheduled run. It does not send mail &mdash; the scheduled run does that.</p>
   form.addEventListener('submit', function () {
     button.setAttribute('aria-busy', 'true');
     button.disabled = true;
-    button.textContent = 'Polling every source…';
+    button.textContent = 'Starting…';
   });
 })();
 </script>

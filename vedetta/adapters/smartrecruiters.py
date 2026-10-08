@@ -32,14 +32,21 @@ class SmartRecruitersAdapter(Adapter):
     platform = "smartrecruiters"
 
     def fetch(self, source: dict, known_keys: set[str] | None = None,
-              detail_budget: int | None = None) -> list[RawPosting]:
+              detail_budget: int | None = None,
+              progress=None) -> list[RawPosting]:
         identifier = source["identifier"]
         known = known_keys or set()
 
         with self.client() as client:
+            if progress is not None:
+                progress(0, None, "listing postings")
             listings = self._list(client, identifier)
             out: list[RawPosting] = []
             spent = 0
+            # Counted over the ones needing a second request; the known ones are free
+            # and including them would make a slow run look fast.
+            to_read = sum(1 for e in listings
+                          if str(e.get("id") or e.get("uuid") or "") not in known)
             for entry in listings:
                 key = str(entry.get("id") or entry.get("uuid") or "")
                 if not key:
@@ -69,6 +76,8 @@ class SmartRecruitersAdapter(Adapter):
                     text=" \n".join(p for p in text_parts if p),
                     raw=entry,
                 ))
+                if progress is not None and spent:
+                    progress(spent, to_read, "adverts read")
         return out
 
     # -------------------------------------------------------------------- listing
