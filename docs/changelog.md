@@ -430,3 +430,32 @@ Append-only. One line per change, newest at the bottom.
   since that change** — it raised a TypeError instead of reporting anything. No test
   had put a shipped example file through `validate`. Two do now, one from each
   direction. 390 tests.
+- 2026-10-09 — **Published**, at `github.com/matteooxx/vedetta`, MIT, 23 commits, CI
+  green. ADR-0013 said from the first week that this had to be generic and publishable
+  from the first line rather than retrofitted, and this is the pass that found out
+  whether that was true. It mostly was: the mechanism was already in code and the case
+  already in configuration, so nothing had to be torn apart. What the audit found was
+  four smaller things, and the shape of them is worth keeping.
+  Two were in the history rather than the working tree, which is the part that is easy
+  to forget: a push publishes every commit, so a clean checkout proves nothing. A
+  timestamped backup of a real settings file had been swept in before `.gitignore`
+  covered that shape — no credential in it, every secret field empty as designed, but
+  somebody's working file all the same. And the runner named one absolute path. Both
+  were rewritten out of all 23 commits, which costs nothing before the first clone and
+  a great deal after it.
+  The path turned out to be a bug as well as a disclosure. `run-vedetta.sh` now derives
+  its own root, with `VEDETTA_ROOT` to override, so the script a stranger clones works
+  where it stands instead of only on the machine it was written for. Every privacy fix
+  on this project has been like that: the thing that made it specific to one person was
+  also the thing that made it worse.
+  The fourth was not on any checklist. The documents quoted the author's own
+  job-search statistics — how many applications, how many unanswered — as evidence that
+  the problem was real. The evidence survives as a shape rather than a figure. A
+  prospective employer reading this repository has no business learning how many times
+  its author has been ignored.
+  Also added: `LICENSE`, which `pyproject.toml` had claimed since the first commit
+  without a file to back it up, and a test workflow against Python 3.11 and 3.12 — the
+  oldest version the project claims to support and the one the container actually runs,
+  because a claim in `pyproject.toml` that nothing checks is a guess. The 27 design
+  documents moved into the repository: the code shows what was built, the records show
+  why, including what was tried and rejected.

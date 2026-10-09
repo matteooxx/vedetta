@@ -1,12 +1,17 @@
 # Current state
 
-**Last updated:** 2026-10-09 (twenty-second revision — the configuration files can be written with your own AI, and checked before they are believed)
+**Last updated:** 2026-10-09 (twenty-third revision — published)
 
 ## Phase
 
-**All four design steps are complete and the first release is deployed.** The
-project is now in operation, and the work ahead is breadth (more adapters) and
-tuning (the rule file), not design.
+**All four design steps are complete, the first release is deployed, and the project
+is published** at `github.com/matteooxx/vedetta` under MIT. It is now in operation,
+and the work ahead is breadth (more adapters) and tuning (the rule file), not design.
+
+The publication is the test ADR-0013 set for itself in the first week: generic and
+publishable from the first line, not retrofitted. Nothing had to be torn apart to do
+it, which is the answer. The private half — one machine's layout, one person's
+targeting rules — stays on the server and is not in the repository.
 
 Design, step A of four. The method is A → B → E → D (ADR-0004):
 
