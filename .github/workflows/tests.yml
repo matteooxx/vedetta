@@ -1,0 +1,40 @@
+# The test suite, on every push and pull request.
+#
+# The suite reaches no network. It used to: the shipped example watchlist carries two
+# verified sources, so for a while every run of the route tests quietly polled two real
+# company job boards. Slow, rude, and worse than either - it made the test run report
+# itself as seeding, which hid the behaviour the test existed to check. The tests now
+# build a configuration whose sources are deliberately unverified.
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The oldest version the project claims to support, and the one the container
+        # actually runs. A claim in pyproject.toml that nothing checks is a guess.
+        python: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install
+        run: pip install -e ".[ui,dev]"
+
+      - name: Test
+        run: pytest -q

@@ -11,3 +11,5 @@ config/rules.yaml
 __pycache__/
 *.pyc
 .venv/
+config/*.yaml.bak-*
+config/profile.yaml

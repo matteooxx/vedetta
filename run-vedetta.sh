@@ -1,11 +1,10 @@
 #!/bin/sh
 # Daily Vedetta run, and delivery of whatever it queued.
 #
-# Lives in the dataset on tank, not in /root: every other application's cron script on
-# this box sits on the single-disk boot pool, which is near end of life, is not
-# snapshotted and is not backed up. This one is covered by the dataset's daily
-# snapshot like the rest of the application. Its log goes to the dataset for the same
-# reason.
+# Install this wherever the application's data lives, rather than in a home directory
+# or /root. On the machine it was written for that meant a snapshotted dataset on the
+# storage pool instead of the single-disk boot pool, which is neither snapshotted nor
+# backed up. The log goes next to the data for the same reason.
 #
 # The application has no mail credential of its own. It writes the digest to an
 # outbox; this script delivers it with the machine's own mail configuration, which is
@@ -13,8 +12,11 @@
 # leak — and an undelivered digest stays queued and is retried rather than lost.
 set -eu
 
-ROOT=/srv/vedetta
-IMAGE=vedetta:local
+# The directory holding `runtime/`, `config/` and `logs/`. It defaults to this
+# script's own directory, so a clone works where it stands; set VEDETTA_ROOT when the
+# script lives apart from the data it manages.
+ROOT="${VEDETTA_ROOT:-$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)}"
+IMAGE="${VEDETTA_IMAGE:-vedetta:local}"
 LOG="$ROOT/logs/vedetta.log"
 ENVFILE="$ROOT/runtime/app.env"
 OUTBOX="$ROOT/runtime/outbox"
