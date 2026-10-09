@@ -1,5 +1,7 @@
 # Vedetta
 
+[matteomastore.com](https://matteomastore.com)
+
 A self-hosted monitor for employers' **own** job boards. Once a day it reads the
 careers listings of the employers you choose, works out what is genuinely new,
 labels each posting with the facts that decide whether it is worth your time, and
