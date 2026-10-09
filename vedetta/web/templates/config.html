@@ -54,7 +54,8 @@ step.</p>
   </div>
   <input type="hidden" name="digest" value="{{ digest }}">
   <div class="row">
-    <button type="submit">Save {{ name }}.yaml</button>
+    <button type="submit" name="action" value="check" class="ghost">Check, without saving</button>
+    <button type="submit" name="action" value="save">Save {{ name }}.yaml</button>
     <span class="small muted" id="dirty-hint" aria-live="polite"></span>
   </div>
   <p class="small muted">
@@ -63,6 +64,177 @@ step.</p>
     concurrent edit is detected rather than overwritten.
   </p>
 </form>
+{% endif %}
+
+{% if check %}
+<h2>What this would do</h2>
+<p class="small muted">Nothing has been written. These numbers come from the postings
+already in the database, judged twice: once by the file on disk and once by the box
+above.</p>
+
+{% if check.kind == 'profile' %}
+<table>
+  <caption>{{ check.postings }} open postings, by location verdict.</caption>
+  <thead><tr><th>Verdict</th><th scope="col">On disk</th><th scope="col">In the box</th><th>Change</th></tr></thead>
+  <tbody>
+  {% for bucket in ['preferred','acceptable','conditional','excluded','unknown'] %}
+  {% set was = check.before[bucket] %}{% set now = check.after[bucket] %}
+  <tr>
+    <td>{{ bucket }}</td>
+    <td class="mono">{{ was }}</td>
+    <td class="mono">{{ now }}</td>
+    <td class="mono {{ '' if now == was else ('positive' if now > was else 'warning') }}">
+      {% if now != was %}{{ '+' if now > was }}{{ now - was }}{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+{% if check.lost_total %}
+<div class="note" style="border-left:3px solid var(--block)">
+  <strong>{{ check.lost_total }} posting{{ 's' if check.lost_total != 1 }} would stop
+  being workable.</strong> This is the expensive direction: a posting folded away by
+  mistake is one you never hear about again. Read the reasons before saving.
+</div>
+<table>
+  <caption>A sample, one per distinct location, with the rule that decided it.</caption>
+  <thead><tr><th>Posting</th><th>Location</th><th>Was</th><th>Would be</th></tr></thead>
+  <tbody>
+  {% for m in check.lost %}
+  <tr>
+    <td class="small">{{ m.title }}</td>
+    <td class="small mono">{{ m.location or '&mdash;' }}</td>
+    <td class="small">{{ m.was }}{% if m.was_why %} <span class="muted">({{ m.was_why }})</span>{% endif %}</td>
+    <td class="small blocking">{{ m.now }}{% if m.now_why %} <span class="muted">({{ m.now_why }})</span>{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="small">Nothing would stop being workable.</p>
+{% endif %}
+
+{% if check.gained_total %}
+<p class="small"><strong>{{ check.gained_total }}</strong> would start being workable
+  &mdash; cheap to be wrong about, since it costs a glance:
+  {% for m in check.gained %}{{ m.location or 'no location' }}{% if not loop.last %}, {% endif %}{% endfor %}.</p>
+{% endif %}
+
+{% elif check.kind == 'rules' %}
+<ul class="small">
+  <li><strong>{{ check.added|length }}</strong> rule(s) added{% if check.added %}:
+    {{ check.added|join(', ') }}{% endif %}</li>
+  <li><strong>{{ check.changed|length }}</strong> changed{% if check.changed %}:
+    {{ check.changed|join(', ') }}{% endif %}</li>
+  <li><strong>{{ check.removed|length }}</strong> removed{% if check.removed %}:
+    {{ check.removed|join(', ') }}{% endif %}
+    {% if check.removed %}&mdash; every label they produced disappears at the next
+    relabel{% endif %}</li>
+</ul>
+{% if check.hits %}
+<table>
+  <caption>What the new and changed rules match, across {{ check.postings }} posting
+    titles. Titles only: reading every stored advert would turn this button into a
+    minute's wait, and a cluster rule is written against the title anyway.</caption>
+  <thead><tr><th>Rule</th><th>Reads as</th><th scope="col">Titles matched</th></tr></thead>
+  <tbody>
+  {% for h in check.hits %}
+  <tr>
+    <td class="mono small">{{ h.id }} <span class="muted">({{ h.state }})</span></td>
+    <td class="small">{{ h.explain }}</td>
+    <td class="mono {{ 'warning' if h.n == 0 }}">{{ h.n }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+<p class="small muted">A rule matching <strong>0</strong> titles is usually a pattern
+  that is too narrow, or one written against the advert body rather than the title.</p>
+{% endif %}
+
+{% elif check.kind == 'settings' %}
+{% if check.changes %}
+<table>
+  <caption>{{ check.changes|length }} setting(s) would change.</caption>
+  <thead><tr><th>Key</th><th>On disk</th><th>In the box</th></tr></thead>
+  <tbody>
+  {% for c in check.changes %}
+  <tr><td class="mono small">{{ c.key }}</td>
+    <td class="mono small">{{ c.was if c.was is not none else '&mdash;' }}</td>
+    <td class="mono small">{{ c.now if c.now is not none else '&mdash;' }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="small">Nothing would change.</p>
+{% endif %}
+{% endif %}
+{% endif %}
+
+{% if prompt %}
+<h2>Write this file with your own AI</h2>
+<p class="small">An assistant that has read your CV can fill most of this in a minute,
+and the hard part was never the YAML &mdash; it is knowing what the keys mean. The
+prompt below carries the whole schema with it, so the assistant has the exact key
+names rather than a guess at them, and it is generated from the file on disk, so it
+cannot describe keys this program does not read.</p>
+
+<ol class="small">
+  <li>Copy the prompt below. <a href="{{ url_for('config_prompt', name=name) }}">Open
+    it as plain text</a> if that is easier to select whole.</li>
+  <li>Paste it into whichever assistant you use, <strong>and attach your CV</strong>.
+    It is told to ask you about anything your CV does not say rather than invent it,
+    so expect questions, and answer them.</li>
+  <li>Paste what it gives you into the box above and press
+    <strong>Check, without saving</strong>. You will see what it would do to the
+    postings already here before anything is written.</li>
+  <li>Save when the numbers look right. A timestamped backup is kept beside the file,
+    so a bad answer is undone by putting the old one back.</li>
+</ol>
+
+<div class="note">
+  <strong>It is told not to guess.</strong> A configuration file full of confident
+  filler is worse than an empty one, because you would believe it. The prompt's first
+  rule is to collect every gap into one list of questions and wait, and to leave a key
+  out rather than fill it in &mdash; an absent key means "no opinion", which this
+  program handles.
+</div>
+
+<div class="field">
+  <label for="gen-prompt">The prompt</label>
+  <textarea id="gen-prompt" readonly spellcheck="false" rows="16"
+            aria-describedby="gen-note">{{ prompt }}</textarea>
+  <p class="small muted" id="gen-note">Contains the commented example file and nothing
+    about you. Safe to paste anywhere.</p>
+</div>
+
+{% if prompt_update %}
+<details class="facet">
+  <summary>A second version, for updating what you already have</summary>
+  <p class="facet-hint">The same prompt with your current <code>{{ name }}.yaml</code>
+    appended, so the assistant changes what needs changing instead of starting again.
+    It works better &mdash; and it means the text you paste into the assistant
+    <strong>contains your own configuration</strong>. Your data and your call, but it
+    should be a choice you make rather than one made for you.</p>
+  <div class="field">
+    <label for="gen-prompt-mine">The prompt, with your current file</label>
+    <textarea id="gen-prompt-mine" readonly spellcheck="false" rows="12">{{ prompt_update }}</textarea>
+    <p class="small muted"><a href="{{ url_for('config_prompt', name=name, **{'with': 'mine'}) }}">As
+      plain text</a></p>
+  </div>
+</details>
+{% endif %}
+
+{% elif name == 'watchlist' %}
+<h2>Why there is no prompt for this file</h2>
+<p class="small">An assistant asked for a company's hiring-platform identifier will
+produce one that looks right. During this project's design two independent automated
+sources each returned a <em>different company</em> than the one asked for &mdash; one
+of them a road-paving contractor returned as an asset manager, and a vendor's demo
+board returned as Amazon's, complete with a posting called "GCO Test Position".</p>
+<p class="small">So a source is only ever polled once a human has looked at real
+postings from it and written the date into <code>verified_on</code>. An assistant can
+still help with the easy half: ask it for employers worth watching and their careers
+page, then find each one's real feed yourself and confirm it.</p>
 {% endif %}
 
 <h2>What this file controls</h2>

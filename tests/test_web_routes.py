@@ -108,3 +108,58 @@ def test_health_reports_the_database(client):
     import json
     payload = json.loads(client.get("/health").data)
     assert "ok" in payload
+
+
+@pytest.mark.parametrize("name", ["profile", "rules", "settings"])
+def test_the_generator_prompt_has_its_own_plain_text_page(client, name):
+    """A copy button would need script and this interface has none. A page of text
+    answers the same need: open it, select all, paste."""
+    response = client.get(f"/config/{name}/prompt.txt")
+    assert response.status_code == 200
+    assert response.mimetype == "text/plain"
+    assert b"NEVER INVENT A VALUE" in response.data
+
+
+def test_the_watchlist_has_no_prompt_page(client):
+    assert client.get("/config/watchlist/prompt.txt").status_code == 404
+
+
+def test_the_config_page_offers_the_prompt(client):
+    body = client.get("/config/profile").data.decode("utf-8", "ignore")
+    assert "Write this file with your own AI" in body
+    assert "attach your CV" in body
+
+
+def test_check_writes_nothing(client, tmp_path):
+    """The whole point of a Check button. It renders a report and leaves the file
+    alone, so a candidate file can be weighed before it is believed."""
+    before = client.get("/config/profile").data
+    response = client.post("/config/profile", data={
+        "action": "check",
+        "text": "locations:\n  acceptable: [Ireland]\n",
+    })
+    assert response.status_code == 200
+    assert b"What this would do" in response.data
+    assert client.get("/config/profile").data == before
+
+
+def test_check_reports_a_key_nothing_reads_without_saving(client):
+    response = client.post("/config/profile", data={
+        "action": "check",
+        "text": "location:\n  acceptable: [Ireland]\n",
+    })
+    assert response.status_code == 200
+    body = response.data.decode("utf-8", "ignore")
+    assert "would not save" in body
+    assert "did you mean locations?" in body
+
+
+def test_saving_a_key_nothing_reads_is_refused(client):
+    """Refused rather than warned about: it saves cleanly and then does nothing,
+    which is the one kind of mistake these files cannot afford."""
+    response = client.post("/config/profile", data={
+        "action": "save",
+        "text": "location:\n  acceptable: [Ireland]\n",
+    })
+    body = response.data.decode("utf-8", "ignore")
+    assert "Not saved" in body

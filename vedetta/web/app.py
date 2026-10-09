@@ -20,6 +20,8 @@ from flask import (Flask, abort, flash, redirect, render_template, request,
 
 from .. import config as config_mod
 from .. import configstore
+from .. import predict as predict_mod
+from .. import prompts as prompts_mod
 from .. import facets
 from .. import insights as insights_mod
 from .. import progress as progress_mod
@@ -232,6 +234,42 @@ def create_app() -> Flask:
         return render_template("sample.html", source=source, preview=preview,
                                total=len(items))
 
+
+
+    def _prompt_context(name: str) -> dict:
+        """The generator prompt for this file, or nothing for a file that has none."""
+        if name not in prompts_mod.GENERATED:
+            return {"prompt": None, "prompt_update": None}
+        schema = configstore.read(CONFIG_DIR, name, prefer_example=True).text
+        current = configstore.read(CONFIG_DIR, name)
+        return {
+            "prompt": prompts_mod.build(name, schema),
+            # Offered separately, and only when a real file exists, because this one
+            # carries the reader's own configuration into whatever assistant they
+            # paste it into. Their data, their call - but it should be a choice they
+            # make rather than one made for them.
+            "prompt_update": (None if current.is_example
+                              else prompts_mod.build(name, schema, current.text)),
+        }
+
+    def _check_config(name: str, text: str) -> dict:
+        """Validate, then say what it would do. Raises ConfigError if it would not save."""
+        candidate = configstore.validate(name, text)
+        cfg = load_config()
+        conn = open_db(cfg)
+        try:
+            if name == "profile":
+                from ..profile import Profile
+                return predict_mod.profile_effect(
+                    conn, cfg.profile, Profile.from_dict(candidate))
+            if name == "rules":
+                return predict_mod.rules_effect(conn, cfg.rules, candidate)
+            if name == "settings":
+                return predict_mod.settings_effect(cfg.settings, candidate)
+            return {"kind": name}
+        finally:
+            conn.close()
+
     # --------------------------------------------------------------------- config
     @app.route("/config/<name>", methods=["GET", "POST"])
     def config_edit(name: str):
@@ -240,6 +278,23 @@ def create_app() -> Flask:
         if request.method == "POST":
             text = request.form.get("text", "")
             expected = request.form.get("digest") or None
+
+            # Check and Save are two buttons on one form, so the box the reader is
+            # looking at is the box that gets checked. Check writes nothing.
+            if request.form.get("action") == "check":
+                try:
+                    report = _check_config(name, text)
+                except configstore.ConfigError as exc:
+                    flash(f"This would not save: {exc}", "error")
+                    report = None
+                else:
+                    flash("Valid, and nothing was written. What it would do is "
+                          "below.", "ok")
+                return render_template("config.html", name=name, text=text,
+                                       digest=expected, conflict=None, path=None,
+                                       is_example=False, check=report,
+                                       **_prompt_context(name))
+
             try:
                 saved = configstore.save(CONFIG_DIR, name, text, expected)
             except configstore.ConflictError as exc:
@@ -262,7 +317,22 @@ def create_app() -> Flask:
         current = configstore.read(CONFIG_DIR, name)
         return render_template("config.html", name=name, text=current.text,
                                digest=current.digest, conflict=None,
-                               path=current.path, is_example=current.is_example)
+                               path=current.path, is_example=current.is_example,
+                               check=None, **_prompt_context(name))
+
+    @app.route("/config/<name>/prompt.txt")
+    def config_prompt(name: str):
+        """The prompt as plain text, so it can be selected whole or fetched.
+
+        A copy button would need script, and this interface has none. A page of
+        text answers the same need: open it, select all, paste.
+        """
+        context = _prompt_context(name)
+        which = request.args.get("with") or "schema"
+        body = context.get("prompt_update" if which == "mine" else "prompt")
+        if not body:
+            abort(404)
+        return app.response_class(body, mimetype="text/plain; charset=utf-8")
 
     # ------------------------------------------------------------------- run now
     @app.post("/run")
