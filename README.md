@@ -1,6 +1,7 @@
 # Vedetta
 
-[matteomastore.com](https://matteomastore.com)
+[matteomastore.com](https://matteomastore.com) &nbsp;·&nbsp;
+[![tests](https://github.com/matteooxx/vedetta/actions/workflows/tests.yml/badge.svg)](https://github.com/matteooxx/vedetta/actions/workflows/tests.yml)
 
 A self-hosted monitor for employers' **own** job boards. Once a day it reads the
 careers listings of the employers you choose, works out what is genuinely new,
