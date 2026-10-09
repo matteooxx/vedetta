@@ -58,7 +58,8 @@ Requires Python 3.11 or newer.
 
 ```sh
 pip install -e .
-cp config/settings.example.yaml config/settings.yaml
+cp config/profile.example.yaml   config/profile.yaml
+cp config/settings.example.yaml  config/settings.yaml
 cp config/watchlist.example.yaml config/watchlist.yaml
 cp config/rules.example.yaml     config/rules.yaml
 cp .env.example .env            # then chmod 600 .env
@@ -73,11 +74,49 @@ vedetta init             # create the database, load the watchlist
 vedetta run --stdout     # poll and print instead of sending
 vedetta run              # poll and send the digest
 vedetta check            # read-only integrity report
+vedetta relabel          # re-apply rules and profile to postings already stored
+vedetta outbox           # digests queued but not yet delivered
+vedetta digest --list    # runs that found postings and reported none
+vedetta dedupe           # postings stored twice, reported before anything changes
 ```
 
 The first run after a watchlist change **seeds silently**: it records what already
 exists and sends nothing, so adding an employer never produces an email with several
 hundred items in it.
+
+## The interface
+
+The digest is the product; the interface is for the half of the work a daily email
+cannot do. It runs as a long-lived process beside the scheduled run, reads the same
+database and edits the same configuration files — there is no second store and no
+import step.
+
+```sh
+pip install -e ".[ui]"
+vedetta-web              # 0.0.0.0:5003, or set VEDETTA_WEB_HOST / VEDETTA_WEB_PORT
+```
+
+It holds nothing back that the digest shows, and adds four things:
+
+- **Faceted filtering** over location, employer, technology, label, working pattern,
+  age and your own triage, multi-select within a facet and intersected across them.
+  Each facet counts its options as if it were not filtered itself, so picking Ireland
+  never makes Poland read zero. Locations are a two-level tree — a country covers
+  everything inside it, so picking one finds the postings that named only a city.
+- **A triage ladder** — interested, applied, screening, interview, offer, rejected —
+  kept as append-only history, so clearing a decision does not erase that it was made.
+- **Insights** that are counted rather than asserted: which employers are actually
+  hiring, which postings have been reposted, which have gone stale.
+- **The configuration files, editable in the browser**, with comments preserved, a
+  concurrent edit detected rather than overwritten, a timestamped backup on every
+  write, and a **Check** button that validates without saving and then says what the
+  change would do to the postings you already have. Each file also carries a prompt
+  you can hand to your own assistant to write it from your CV — it is told to ask
+  about anything your CV does not say rather than invent it.
+
+Run it behind whatever you already trust. It has no authentication of its own, and
+the author's own deployment binds it to localhost and publishes it over a private
+network only.
 
 ## Configuration
 
@@ -86,6 +125,7 @@ particular person or job market in the source.
 
 | File | What it holds |
 | --- | --- |
+| `config/profile.yaml` | what you can actually take on: where you may legally work, which seniority, which technologies you claim, which kinds of role you are after |
 | `config/watchlist.yaml` | which employers, on which platforms, with which identifiers and verification dates |
 | `config/rules.yaml` | what counts as a blocker, a warning or a good sign |
 | `config/settings.yaml` | database path, digest time and recipients, ranking weights, which discovery techniques are enabled |
@@ -134,8 +174,12 @@ rather than per employer.
 
 | Status | Platform |
 | --- | --- |
-| Implemented | Greenhouse |
-| Designed, not yet written | SmartRecruiters, Ashby, Lever, Workday, sitemap + schema.org `JobPosting` |
+| Implemented | Greenhouse, SmartRecruiters, Workday, sitemap + schema.org `JobPosting` |
+| Designed, not yet written | Ashby, Lever |
+
+Those four reach 36 confirmed sources across 40 employers on the author's own
+watchlist — 21 on Greenhouse, 6 through the sitemap path, 5 on SmartRecruiters, 4 on
+Workday.
 
 The sitemap path deserves a note: many careers sites publish `sitemap.xml` listing
 every job URL, and their detail pages carry schema.org `JobPosting` markup because

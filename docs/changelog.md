@@ -459,3 +459,43 @@ Append-only. One line per change, newest at the bottom.
   because a claim in `pyproject.toml` that nothing checks is a guess. The 27 design
   documents moved into the repository: the code shows what was built, the records show
   why, including what was tried and rejected.
+- 2026-10-09 (later) — **The documents audited against the project, after one line of
+  the README turned out to be false.** The operator asked whether the platforms table
+  was true. It was not: it said one adapter was implemented when four are — Greenhouse,
+  SmartRecruiters, Workday and the sitemap + schema.org path, together reaching 36
+  confirmed sources — and listed as unwritten the very adapter the same README spends a
+  paragraph praising. Checking it properly turned up three more in the README and five
+  in `docs/`, so the honest answer to "is this true?" was "no, and neither is a good
+  deal else".
+  In the README: the web interface was **not mentioned at all** — zero occurrences of
+  "web", "interface" or "triage" — so the front page described a command-line tool and
+  a reader would never learn about the filtering, the triage ladder, the insights or
+  the configuration editor. Three of seven CLI commands were listed. And
+  `profile.yaml`, the file that decides what counts as workable, appeared in neither
+  the install steps nor the configuration table: the single most important file for a
+  new user was absent from its own documentation.
+  In `docs/`: the index still opened with "the app has not been named yet, and its
+  purpose has not been disclosed yet" — the first thing a reader sees, in a repository
+  published under that name. It pointed at a private directory on a PC that no longer
+  holds it, called itself "a candidate for public publication", and left four of the
+  eight documents out of its own read order. `data-model.md` described eleven tables
+  where sixteen exist, including one (`source_candidate`) that was never built; it is
+  now marked as the step-E design it is, with `vedetta/db.py` named as the only
+  authority and a note on what diverged. Its sixteen domain events, checked one by one,
+  needed no revision at all — which is the part worth noticing.
+  `ADR-0002` was still marked **Accepted** while its decision had been reversed in
+  full, and is now Superseded. **ADR-0017** records the publication itself: public
+  under MIT with the documents included, the private half on the server, pushed from
+  the server by a deploy key rather than a token, nothing published automatically, and
+  every push audited over the whole history rather than the working tree.
+  One finding was a gap in the publication audit rather than in the documents.
+  `ADR-0002` carried two absolute Windows paths including the PC's account name, and
+  the audit had swept for `/mnt/` paths on the server and never for paths on the
+  author's own machine. Corrected forward, not by rewriting an already-pushed branch:
+  the exposure is an account name inferable from the public one, which does not justify
+  relaxing branch protection to force-push. The pattern list now covers both shapes.
+  The lesson is the one the server handbook already states and this pass proves twice
+  over: **a document is only as good as its last verification.** Every figure above was
+  read off the live system — the adapter registry, the source counts per platform, the
+  table list, the event count — and the ones that had been written from memory were the
+  ones that were wrong.

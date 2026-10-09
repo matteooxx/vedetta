@@ -1,5 +1,25 @@
 # Data model — step E
 
+> **This is the design, not the schema.** It was written before any code, and the
+> schema that shipped is `vedetta/db.py` — commented, migrated additively, and the
+> only authority. Read this file for *why* the shape is what it is; read `db.py` for
+> what the database actually contains.
+>
+> What diverged, as of 2026-10-09: eleven tables were designed and **sixteen** exist.
+> `source_candidate` was never built — discovery proposes into the watchlist file
+> instead, where a human confirms it, which ADR-0012 and the enrolment rule explain.
+> Five tables arrived later and are documented in `db.py`: `posting_place` and
+> `posting_skill` (a free-text column cannot be faceted), `place_meta` (which place is
+> inside which, derived from the data), `run_event` (so a running poll can say where
+> it has got to) and `triage_event` (append-only, so clearing a decision does not
+> erase that it was made). A `mail_observation` table also exists in the author's own
+> database as an orphan: the mailbox feature was built, removed at the operator's
+> request, and the table it had created was left behind rather than dropped. It is not
+> in the shipped schema.
+>
+> The event storming below needed no revision, which is the part worth noticing: the
+> sixteen domain events in time order survived implementation unchanged.
+
 **Date:** 2026-10-07
 **Phase:** Step E of the design method (ADR-0004), reached with the real field shapes
 of nine hiring platforms in hand rather than with assumptions.

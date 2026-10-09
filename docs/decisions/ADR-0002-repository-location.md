@@ -1,7 +1,14 @@
 # ADR-0002 — Where the project files live
 
 **Date:** 2026-10-06
-**Status:** Accepted
+**Status:** Superseded by ADR-0015 and ADR-0017 (2026-10-09)
+
+> The decision below put the canonical copy on the operator's PC and mirrored it to
+> the server. That is now reversed in full: the server holds the only copy, there is
+> nothing on the PC, and the public repository is pushed from the server itself. The
+> reasoning here is kept because it was right for the situation it was made in — the
+> project had no code, no data and no deployment, and a PC working copy was the fastest
+> way to start. ADR-0015 moved the storage; ADR-0017 removed the last PC copy.
 
 ## Context
 
@@ -31,11 +38,21 @@ the decision and adds a move later.
 
 ## Decision
 
-- Canonical: `C:\Users\matte\Documents\mac-projects\projects\vedetta\`
+- Canonical: a working copy on the PC, under the `projects/` directory of the
+  operator's existing project archive
 - Publishable documentation: `docs/` inside that folder
-- Site-specific material: `C:\Users\matte\Documents\mac-projects\private-ops\vedetta\`
-- Mirrored to the NAS archive at the end of a working session, by the same
+- Site-specific material: a sibling `private-ops/` directory in the same archive,
+  outside the publishable worktree
+- Mirrored to the server archive at the end of a working session, by the same
   fast-forward the other projects use
+
+> The two absolute paths that stood here were replaced on 2026-10-09. They named the
+> PC's account and the layout of a personal Documents directory, which is the same
+> class of disclosure as a path on the server, and the publication audit had swept for
+> the latter and not the former. The paths are still in this file's earlier history;
+> the exposure is an account name already inferable from the public one, and rewriting
+> a published branch was judged not to be worth it. The audit pattern list in the
+> private half now covers both shapes.
 
 `vedetta` is a placeholder. When the app is named, the directory is renamed
 and the rename is recorded in `changelog.md`.

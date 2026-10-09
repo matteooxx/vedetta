@@ -1,6 +1,6 @@
 # Current state
 
-**Last updated:** 2026-10-09 (twenty-third revision — published)
+**Last updated:** 2026-10-09 (twenty-fourth revision — published, and the documents audited against the code)
 
 ## Phase
 
@@ -47,7 +47,7 @@ posting IDs and publication dates, so no headless browser is needed. Evidence in
 | ADR | Decision |
 | --- | --- |
 | 0001 | Documentation system: handbook-style, one file per decision and per action |
-| 0002 | Location: PC canonical under `mac-projects/projects/`, mirrored to the NAS |
+| 0002 | ~~Location: PC canonical, mirrored to the server~~ — **superseded by 0015 and 0017**: the server is the only copy |
 | 0003 | Language: English for documents, Italian for conversation |
 | 0004 | Design method: A → B → E → D, with C in reserve |
 | 0005 | Sources: employer careers pages only in the first release, via per-platform adapters |
@@ -62,13 +62,19 @@ posting IDs and publication dates, so no headless browser is needed. Evidence in
 | 0013 | **Generic from the first line** — mechanism in code, the case in configuration; publishable |
 | 0014 | The server is the only host; AI is an optional external worker. Amends ADR-0006 |
 | 0015 | The PC copy is temporary; the server becomes the only home. Supersedes part of ADR-0002 |
+| 0017 | Published under MIT with the documents; pushed from the server by a deploy key; nothing publishes automatically |
 
 ## What is proposed but not yet decided
 
 These came out of step A and need the app idea, or an operator ruling, before
 they can become ADRs. They are listed in full in the platform envelope:
 
-- Which port the app binds, and whether it is tailnet-only or also LAN-visible
+- ~~Which port the app binds, and whether it is tailnet-only or also LAN-visible~~ —
+  **settled:** bound to localhost only and published over the private network. Never
+  the LAN, never the public internet
+- ~~Whether the app holds data the operator would miss~~ — **settled:** yes. The
+  triage decisions cannot be rebuilt by polling again, which is why the dataset has
+  its own daily snapshot and why every schema migration is additive only
 - Whether the app holds data the operator would miss, which decides how hard the
   export path has to work — **there is no off-site backup of this NAS**
 - Whether the app needs outbound internet access or any third-party credential
