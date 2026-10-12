@@ -9,7 +9,10 @@ COPY pyproject.toml README.md ./
 COPY vedetta ./vedetta
 # One image serves both roles: the scheduled run and the long-running interface.
 # Two images would drift.
-RUN pip install --no-cache-dir ".[ui]" waitress
+# waitress is no longer named here: it is declared in the ui extra, so this line
+# and a clean `pip install .[ui]` now install exactly the same set. Passing it
+# separately was what let the declaration stay wrong without anyone noticing.
+RUN pip install --no-cache-dir ".[ui]"
 
 # Shipped examples. The real configuration is bind-mounted at /data/config, which is
 # also where the interface writes - so it must live outside the git worktree and be
