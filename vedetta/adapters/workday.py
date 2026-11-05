@@ -102,15 +102,20 @@ class WorkdayAdapter(Adapter):
         offset = 0
         total: int | None = None
         for _ in range(MAX_PAGES):
-            try:
-                response = client.post(
+            # Through the retrying helper: a 503 from the tenant's load balancer on
+            # page nine used to throw away the eight pages already read and report
+            # the employer as failing for the day. The helper raises the same
+            # AdapterError once the attempts are spent, so what a real outage looks
+            # like from here has not changed.
+            response = self.retrying(
+                lambda: client.post(
                     endpoint,
                     json={"limit": PAGE, "offset": offset, "searchText": "",
                           "appliedFacets": {}},
                     headers={"Content-Type": "application/json"},
-                )
-            except httpx.HTTPError as exc:
-                raise AdapterError(f"transport: {type(exc).__name__}") from exc
+                ),
+                what=f"the listing at offset {offset}",
+            )
             if response.status_code == 404:
                 raise AdapterError(
                     "endpoint not found (404) - the tenant or site name is wrong, "
@@ -137,6 +142,27 @@ class WorkdayAdapter(Adapter):
             if len(page) < PAGE or (total is not None and offset >= total):
                 break
             time.sleep(POLITE_DELAY)
+        else:
+            # The loop ran out of its own pages, not out of board: MAX_PAGES is this
+            # adapter's ceiling and nothing to do with the platform. Reaching it was
+            # being reported as "pagination is incomplete", the message written for a
+            # board that stops answering halfway - so a board larger than 800
+            # postings was recorded as a failing source every single day, and the
+            # digest said so, which is how a reader learns to stop reading failures.
+            #
+            # It is not `ok` either. The listing really is short, so `incomplete`
+            # stays set and close_missing will not retire a posting on the strength
+            # of this poll. What changes is that a configured limit is described as a
+            # configured limit, and the postings are kept instead of thrown away.
+            if total is not None and len(collected) < total:
+                self.note(
+                    f"stopped at this adapter's own page cap of {MAX_PAGES} pages "
+                    f"({len(collected)} of the {total} postings the board declares) "
+                    f"- not a fault and not the whole board either, so the "
+                    f"{len(collected)} returned are used and nothing is closed from "
+                    f"this poll; raise MAX_PAGES to read the rest",
+                    incomplete=True)
+                return collected
         if total is not None and len(collected) < total:
             short = total - len(collected)
             if short <= _tolerable(total):
@@ -177,11 +203,16 @@ class WorkdayAdapter(Adapter):
         filtered by the facet that matters most.
         """
         try:
-            response = client.get(f"{base}{path}")
+            # Retried like the listing, but AdapterError is caught here rather than
+            # allowed out: a detail document that will not load costs this posting a
+            # few labels, and letting the retry helper's final AdapterError escape
+            # would turn that into the whole employer failing for the day.
+            response = self.retrying(lambda: client.get(f"{base}{path}"),
+                                     what=f"the advert at {path}")
             if response.status_code != 200:
                 return None, None
             payload = response.json()
-        except (httpx.HTTPError, ValueError):
+        except (AdapterError, httpx.HTTPError, ValueError):
             return None, None
         info = payload.get("jobPostingInfo") or {}
 
