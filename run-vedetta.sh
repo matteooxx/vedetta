@@ -25,6 +25,50 @@ mkdir -p "$ROOT/logs"
 
 log() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >> "$LOG"; }
 
+# Mail an alert with the machine's own mail configuration. Takes a subject and a body.
+#
+# This exists because a line in "$LOG" is not a notification. The scheduler runs this
+# script with both its streams sent to /dev/null, so everything printed here is thrown
+# away, and nobody reads a log file on a day when nothing appears to be wrong. A run
+# that FAILS is already mailed, below; a digest that fails to be DELIVERED was not,
+# which left the one failure the reader cannot discover by reading the digest as the
+# only silent failure in a project whose whole point is that failures are visible.
+#
+# Built by truenas_api_client with the variable parts travelling in the environment,
+# NOT by interpolating text into JSON on a midclt command line. The handbook says so
+# outright (api.md F-1, F-2) and this project has the scar: the first delivery attempt
+# died with `sudo: argv[3] mismatch` on a 15 KB payload. deliver-digest.py and
+# /root/check-vedetta-health.sh are the in-house precedents. job=True waits for the
+# send and raises, so an alert that itself fails to go out is not mistaken for one
+# that went.
+alert() {
+  ALERT_SUBJECT="$1" ALERT_TEXT="$2" \
+  ALERT_TO="$(sed -n 's/^VEDETTA_MAIL_TO=//p' "$ENVFILE" 2>/dev/null | head -1)" \
+  python3 - <<'PY'
+import os, sys
+
+try:
+    from truenas_api_client import Client
+except ImportError as exc:
+    print("alert not sent, middleware client unavailable: %s" % exc, file=sys.stderr)
+    sys.exit(1)
+
+payload = {"subject": os.environ["ALERT_SUBJECT"], "text": os.environ["ALERT_TEXT"]}
+recipient = (os.environ.get("ALERT_TO") or "").strip()
+if recipient:
+    # Left out when unset rather than guessed, so mail.send falls back to the
+    # machine's configured recipient instead of failing on an empty address.
+    payload["to"] = [recipient]
+
+try:
+    with Client() as client:
+        client.call("mail.send", payload, job=True)
+except Exception as exc:
+    print("alert send FAILED: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
+    sys.exit(1)
+PY
+}
+
 # Run the application in a throwaway container with the same hardening the long-running
 # interface uses.
 vedetta() {
@@ -97,6 +141,9 @@ fi
 # cannot discover by reading the digest.
 DELIVERED=0
 FAILED=0
+# Collected as they happen so the alert can say WHICH digest and WHY, rather than
+# "something did not send" and a pointer to a log the reader has to go and find.
+REASONS=''
 for FILE in "$OUTBOX"/run-*.txt; do
   [ -e "$FILE" ] || break
   RUN_ID=$(basename "$FILE" .txt | sed 's/^run-//')
@@ -116,17 +163,41 @@ for FILE in "$OUTBOX"/run-*.txt; do
       DELIVERED=$((DELIVERED + 1))
     else
       log "digest for run $RUN_ID was sent but could not be recorded; it stays queued"
+      REASONS="$REASONS
+run $RUN_ID: the mail was sent but could not be recorded as sent, so it stays
+  queued and WILL be delivered again on the next run."
       FAILED=$((FAILED + 1))
     fi
   else
     log "digest for run $RUN_ID could not be sent; left queued for the next run"
     log "  reason: $DELIVERY"
+    REASONS="$REASONS
+run $RUN_ID: $DELIVERY"
     FAILED=$((FAILED + 1))
   fi
 done
 
 if [ "$FAILED" -gt 0 ]; then
   log "run finished with $DELIVERED delivered and $FAILED still queued"
+  # The watch itself worked; what failed is the one thing the reader cannot notice by
+  # reading the digest, because the digest never arrived. So it is said out loud,
+  # exactly as a failed run is.
+  if alert "Vedetta digest NOT delivered" \
+"The daily watch ran, but $FAILED digest(s) could not be delivered and are still
+queued. $DELIVERED went out.
+
+A queued digest is retried on every run, so this fixes itself once the cause is
+gone and nothing is lost in the meantime. It does mean no email arrived today.
+$REASONS
+
+Queued files:      $OUTBOX
+Full log:          $LOG
+Deliver by hand:   python3 $ROOT/deliver-digest.py $OUTBOX/run-<id>.txt"
+  then
+    log "alerted that $FAILED digest(s) are still queued"
+  else
+    log "could not send the undelivered-digest alert either; only $LOG has it"
+  fi
   exit 1
 fi
 

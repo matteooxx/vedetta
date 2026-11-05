@@ -77,6 +77,57 @@ def humanise(value) -> str:
     return pretty
 
 
+# How long a digest may sit in the outbox before its being there is a fault rather
+# than a normal wait.
+#
+# Queueing is not an error: the mail transport belongs to the host, so a run started
+# from this interface writes the digest and the next scheduled run delivers it. On the
+# worst timing that is a wait of just under 24 hours. 26 leaves that a clear margin,
+# so a digest still queued past it is one that a delivery attempt has already failed
+# on - which is the thing worth waking somebody for.
+#
+# Deliberately not "queued at all": an alert that is usually nothing is an alert the
+# reader learns to skip, and this project's cardinal sin is a failure nobody reads.
+STALE_AFTER_HOURS = 26
+
+
+def outbox_state(db_path) -> dict:
+    """What is waiting to be mailed, and for how long.
+
+    Reported by /health because an undelivered digest is the one failure the reader
+    cannot discover by reading the digest - there is no digest to read. Nothing here
+    writes or deletes: the runner owns the outbox.
+    """
+    try:
+        waiting = outbox.pending(db_path)
+    except OSError as exc:
+        # Said rather than swallowed. An outbox that cannot be listed is itself a
+        # reason to look, and returning "nothing queued" here would be a lie that
+        # reads as health.
+        return {"readable": False, "stale": True,
+                "error": f"{type(exc).__name__}: {exc}"}
+
+    now = datetime.now(timezone.utc)
+    queued = []
+    oldest = None
+    for item in waiting:
+        try:
+            written = datetime.fromtimestamp(item.path.stat().st_mtime, timezone.utc)
+            hours = round((now - written).total_seconds() / 3600.0, 1)
+        except OSError:
+            # The file was listed and is now unreadable, most likely delivered and
+            # cleared between the two calls. Counted, not aged.
+            hours = None
+        queued.append({"run": item.run_id, "queued_hours": hours})
+        if hours is not None and (oldest is None or hours > oldest):
+            oldest = hours
+
+    return {"readable": True, "queued": len(waiting), "oldest_queued_hours": oldest,
+            "stale_after_hours": STALE_AFTER_HOURS,
+            "stale": oldest is not None and oldest >= STALE_AFTER_HOURS,
+            "runs": queued}
+
+
 def create_app() -> Flask:
     app = Flask(__name__)
     app.secret_key = os.environ.get("VEDETTA_SECRET_KEY") or os.urandom(32)
@@ -512,8 +563,24 @@ def create_app() -> Flask:
 
     @app.route("/health")
     def health():
+        """Whether this installation is working - including whether the mail got out.
+
+        The database check alone answered "the file is readable", which is not the
+        whole question. The host's probe asserts that this endpoint reports `ok` as
+        true rather than merely answering 2xx, so reporting the outbox here is what
+        turns a digest stuck in the queue into an email, instead of a line in a log
+        file nobody reads on a day when nothing appears to be wrong.
+        """
         cfg = load_config()
         status = db_mod.check(cfg.db_path)
+        status["outbox"] = state = outbox_state(cfg.db_path)
+        if state.get("stale"):
+            status["ok"] = False
+            status["reason"] = (
+                state.get("error") or
+                f"{state['queued']} digest(s) queued and undelivered, oldest for "
+                f"{state['oldest_queued_hours']}h - a digest waits for the next "
+                f"scheduled run, so past {STALE_AFTER_HOURS}h a delivery has failed")
         return (json.dumps(status), 200 if status.get("ok") else 503,
                 {"Content-Type": "application/json"})
 
