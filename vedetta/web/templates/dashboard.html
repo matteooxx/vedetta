@@ -63,9 +63,18 @@ visible &mdash; leaving them out would look exactly like having nothing to repor
 <table>
   <thead><tr><th>Employer</th><th>Careers page</th></tr></thead>
   <tbody>
+  {# An employer with no careers page recorded used to get a link anyway:
+     `<a href="">—</a>`, whose empty href resolves to this very page and whose whole
+     accessible name is a dash. It is announced as a link, it is in the tab order,
+     and following it reloads the dashboard - a control that exists but does
+     nothing, which is the one thing a link must never be. These rows are here
+     precisely because the route is missing, so the cell now says that in words. #}
   {% for u in unwatched %}
   <tr><td>{{ u.display_name }}</td>
-      <td class="small"><a href="{{ u.careers_url }}" rel="noopener">{{ u.careers_url or '—' }}</a></td></tr>
+      <td class="small">
+        {%- if u.careers_url %}<a href="{{ u.careers_url }}" rel="noopener">{{ u.careers_url }}</a>
+        {%- else %}<span class="muted">No careers page recorded</span>
+        {%- endif %}</td></tr>
   {% endfor %}
   </tbody>
 </table>

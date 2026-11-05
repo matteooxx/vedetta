@@ -176,7 +176,7 @@ textarea{width:100%;min-height:60vh;font-family:var(--mono);font-size:13px;
   display:flex;align-items:center;gap:7px;list-style:none;
   touch-action:manipulation}
 .facet summary::-webkit-details-marker{display:none}
-.facet summary::before{content:'B8';color:var(--ink-soft);font-size:.8em;
+.facet summary::before{content:'▸';color:var(--ink-soft);font-size:.8em;
   transition:transform .12s ease}
 .facet[open] summary::before{transform:rotate(90deg)}
 .facet summary:hover{color:var(--accent)}
@@ -272,17 +272,26 @@ a.tag:hover{background:var(--accent-soft)}
 <a class="skip" href="#main">Skip to content</a>
 <header>
   <p class="brand" translate="no">Vedetta<span>The lookout sights; you decide</span></p>
+  {# Each link marks itself, and only when it has something to mark.
+
+     `aria-current="{{ 'page' if active=='dash' }}"` was the previous form. Jinja
+     renders the untaken branch as the empty string, so every link that was NOT the
+     current one went out as `aria-current=""` - and an empty string is not one of
+     that attribute's values. The one thing the attribute exists to say was being
+     said invalidly on four links out of five (WCAG 4.1.2), and `class=""` rode
+     along with it. An attribute with nothing to say is now absent instead, which is
+     both the correct state and the only form a validator accepts. #}
   <nav aria-label="Sections">
-    <a href="{{ url_for('dashboard') }}" class="{{ 'on' if active=='dash' }}"
-       aria-current="{{ 'page' if active=='dash' }}">Dashboard</a>
-    <a href="{{ url_for('postings') }}" class="{{ 'on' if active=='postings' }}"
-       aria-current="{{ 'page' if active=='postings' }}">Postings</a>
-    <a href="{{ url_for('insights') }}" class="{{ 'on' if active=='insights' }}"
-       aria-current="{{ 'page' if active=='insights' }}">Signals</a>
-    <a href="{{ url_for('sources') }}" class="{{ 'on' if active=='sources' }}"
-       aria-current="{{ 'page' if active=='sources' }}">Sources</a>
-    <a href="{{ url_for('config_edit', name='profile') }}" class="{{ 'on' if active=='config' }}"
-       aria-current="{{ 'page' if active=='config' }}">Configuration</a>
+    <a href="{{ url_for('dashboard') }}"
+       {%- if active == 'dash' %} class="on" aria-current="page"{% endif %}>Dashboard</a>
+    <a href="{{ url_for('postings') }}"
+       {%- if active == 'postings' %} class="on" aria-current="page"{% endif %}>Postings</a>
+    <a href="{{ url_for('insights') }}"
+       {%- if active == 'insights' %} class="on" aria-current="page"{% endif %}>Signals</a>
+    <a href="{{ url_for('sources') }}"
+       {%- if active == 'sources' %} class="on" aria-current="page"{% endif %}>Sources</a>
+    <a href="{{ url_for('config_edit', name='profile') }}"
+       {%- if active == 'config' %} class="on" aria-current="page"{% endif %}>Configuration</a>
   </nav>
 </header>
 <main id="main">

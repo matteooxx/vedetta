@@ -11,14 +11,26 @@
     </summary>
     {% if hint %}<p class="facet-hint">{{ hint }}</p>{% endif %}
     <ul class="facet-list">
+      {# `aria-pressed` used to sit on this anchor. It is a button attribute: on an
+         element whose role is `link` it is not allowed, so it was both ignored and
+         invalid (WCAG 4.1.2). Making it a real button is not the fix either - the
+         row is an ordinary link on purpose, which is what makes every filtered view
+         a URL you can bookmark and send.
+
+         The option's state therefore has to be readable, and it was not: the only
+         thing that said "chosen" was the tick in `.box`, which is `aria-hidden`.
+         The tick stays hidden - it is decoration beside a word - and the state is
+         said in words instead, to whoever is not looking at the colour. #}
       {% for o in opts[:limit] %}
       <li>
         <a href="{{ url_for('postings', **sel.toggled(name, o.value)) }}"
-           class="opt {{ 'on' if sel.is_on(name, o.value) }}"
-           aria-pressed="{{ 'true' if sel.is_on(name, o.value) else 'false' }}">
+           class="opt {{ 'on' if sel.is_on(name, o.value) }}">
           <span class="box" aria-hidden="true">{{ '✓' if sel.is_on(name, o.value) else '' }}</span>
           <span class="opt-label">{{ o.label }}</span>
           <span class="opt-n">{{ o.n }}</span>
+          {%- if sel.is_on(name, o.value) %}
+          <span class="visually-hidden">(filtering by this; activate to remove)</span>
+          {%- endif %}
         </a>
       </li>
       {% endfor %}
@@ -27,7 +39,8 @@
         {% for o in opts[limit:] if sel.is_on(name, o.value) %}
           <a href="{{ url_for('postings', **sel.toggled(name, o.value)) }}"
              class="opt on"><span class="box" aria-hidden="true">✓</span>
-            <span class="opt-label">{{ o.label }}</span><span class="opt-n">{{ o.n }}</span></a>
+            <span class="opt-label">{{ o.label }}</span><span class="opt-n">{{ o.n }}</span>
+            <span class="visually-hidden">(filtering by this; activate to remove)</span></a>
         {% endfor %}
         <span class="small muted">{{ opts|length - limit }} more, narrowed by searching</span>
       </li>
@@ -47,13 +60,17 @@
    works with JavaScript off, it is reachable by keyboard, and the row stays an
    ordinary link, which is what makes the whole filter bookmarkable. #}
 {% macro place_row(o, sel, indent=0) %}
+  {# Same correction as the flat facet above: no `aria-pressed` on a link, and the
+     chosen state said in words rather than only by a hidden tick and a colour. #}
   <a href="{{ url_for('postings', **sel.toggled('place', o.value)) }}"
      class="opt {{ 'on' if sel.is_on('place', o.value) }}"
-     {% if indent %}style="padding-left:{{ 5 + indent }}px"{% endif %}
-     aria-pressed="{{ 'true' if sel.is_on('place', o.value) else 'false' }}">
+     {% if indent %}style="padding-left:{{ 5 + indent }}px"{% endif %}>
     <span class="box" aria-hidden="true">{{ '✓' if sel.is_on('place', o.value) else '' }}</span>
     <span class="opt-label">{{ o.label }}</span>
     <span class="opt-n">{{ o.n }}</span>
+    {%- if sel.is_on('place', o.value) %}
+    <span class="visually-hidden">(filtering by this; activate to remove)</span>
+    {%- endif %}
   </a>
 {% endmacro %}
 
@@ -180,7 +197,10 @@ all your other choices.</p>
         <li><a href="{{ url_for('postings', **sel.as_params(state=key)) }}"
                class="opt {{ 'on' if sel.state==key }}">
           <span class="box" aria-hidden="true">{{ '✓' if sel.state==key else '' }}</span>
-          <span class="opt-label">{{ label }}</span></a></li>
+          <span class="opt-label">{{ label }}</span>
+          {%- if sel.state==key %}
+          <span class="visually-hidden">(the current choice)</span>
+          {%- endif %}</a></li>
         {% endfor %}
       </ul>
     </details>
@@ -278,30 +298,56 @@ all your other choices.</p>
         </p>
       </div>
       <div class="card-actions">
+        {# Every control here names the posting it acts on.
+
+           It used to read "Interested", "Applied", "Not for me", "Clear" and nothing
+           else - two hundred times down a page of two hundred cards, four buttons
+           with the same four names on every one. Taken out of their visual row, as
+           a screen reader's list of controls takes them, they are indistinguishable
+           from each other and useless. The select below already named its posting;
+           the buttons beside it did not.
+
+           The visible text stays short, because a chip reading "Interested - Senior
+           Platform Engineer" would be unreadable. `aria-label` carries the longer
+           name, which is the one case where overriding the visible text is right:
+           the visible word is the start of the accessible name. #}
         {% for s in quick %}
+        {# Resolved once, and falling back to the key, so a `quick` entry missing
+           from `stages` leaves a button with a name rather than a nameless one. #}
+        {% set move = (stages | selectattr('key', 'equalto', s)
+                              | map(attribute='label') | first) or s %}
         <form method="post" action="{{ url_for('triage', posting_id=p.id) }}">
           <input type="hidden" name="state" value="{{ s }}">
           <button type="submit" class="chip{{ ' chosen' if p.triage == s }}"
-                  aria-pressed="{{ 'true' if p.triage == s else 'false' }}">
-            {% for st in stages %}{{ st.label if st.key == s }}{% endfor %}</button>
+                  aria-pressed="{{ 'true' if p.triage == s else 'false' }}"
+                  aria-label="{{ move }} — {{ p.title }}">{{ move }}</button>
         </form>
         {% endfor %}
         {# The full ladder lives behind a select: the three above are the moves that
-           get used constantly, the rest exist so "what is in flight" has an answer. #}
+           get used constantly, the rest exist so "what is in flight" has an answer.
+
+           It used to carry `onchange="this.form.submit()"`. Choosing an option
+           submitted the form and reloaded the page, so merely arrowing through the
+           list to read it fired off a move and navigated away - WCAG 3.2.2, and
+           with a keyboard it was not an edge case but the normal way to use a
+           select. The Set button was in a `<noscript>`, which is to say it existed
+           only for the people who were not affected. It is now always there and the
+           submit is theirs to make. #}
         <form method="post" action="{{ url_for('triage', posting_id=p.id) }}" class="stage-pick">
           <label class="visually-hidden" for="stage-{{ p.id }}">Stage for {{ p.title }}</label>
-          <select id="stage-{{ p.id }}" name="state" onchange="this.form.submit()">
+          <select id="stage-{{ p.id }}" name="state">
             <option value="">Stage…</option>
             {% for st in stages %}
             <option value="{{ st.key }}" {{ 'selected' if p.triage == st.key }}>{{ st.label }}</option>
             {% endfor %}
           </select>
-          <noscript><button type="submit" class="chip">Set</button></noscript>
+          <button type="submit" class="chip" aria-label="Set the stage for {{ p.title }}">Set</button>
         </form>
         {% if p.triage %}
         <form method="post" action="{{ url_for('triage', posting_id=p.id) }}">
           <input type="hidden" name="state" value="clear">
-          <button type="submit" class="chip subtle">Clear</button>
+          <button type="submit" class="chip subtle"
+                  aria-label="Clear your triage of {{ p.title }}">Clear</button>
         </form>
         {% endif %}
       </div>

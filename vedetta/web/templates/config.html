@@ -7,13 +7,19 @@
 over SSH are the same act with different tools — there is no second copy and no import
 step.</p>
 
+{# The file you are editing marks itself, and the other three say nothing.
+
+   Same defect as the section navigation in base.html: `{{ 'page' if n == name }}`
+   renders the empty string on the three links that are not current, so they each
+   carried `aria-current=""`, which is not one of that attribute's values (WCAG
+   4.1.2). Absent is the correct way to say "not current". #}
 <div class="segmented" role="group" aria-label="Configuration files">
   {% for n, label in [('profile','profile — what you can take on'),
                       ('rules','rules — what to look for'),
                       ('watchlist','watchlist — who to watch'),
                       ('settings','settings — how it runs')] %}
-    <a href="{{ url_for('config_edit', name=n) }}" class="{{ 'on' if n == name }}"
-       aria-current="{{ 'page' if n == name }}">{{ label }}</a>
+    <a href="{{ url_for('config_edit', name=n) }}"
+       {%- if n == name %} class="on" aria-current="page"{% endif %}>{{ label }}</a>
   {% endfor %}
 </div>
 
@@ -103,7 +109,7 @@ above.</p>
   {% for m in check.lost %}
   <tr>
     <td class="small">{{ m.title }}</td>
-    <td class="small mono">{{ m.location or '&mdash;' }}</td>
+    <td class="small mono">{{ m.location or '—' }}</td>
     <td class="small">{{ m.was }}{% if m.was_why %} <span class="muted">({{ m.was_why }})</span>{% endif %}</td>
     <td class="small blocking">{{ m.now }}{% if m.now_why %} <span class="muted">({{ m.now_why }})</span>{% endif %}</td>
   </tr>
@@ -159,8 +165,8 @@ above.</p>
   <tbody>
   {% for c in check.changes %}
   <tr><td class="mono small">{{ c.key }}</td>
-    <td class="mono small">{{ c.was if c.was is not none else '&mdash;' }}</td>
-    <td class="mono small">{{ c.now if c.now is not none else '&mdash;' }}</td></tr>
+    <td class="mono small">{{ c.was if c.was is not none else '—' }}</td>
+    <td class="mono small">{{ c.now if c.now is not none else '—' }}</td></tr>
   {% endfor %}
   </tbody>
 </table>
