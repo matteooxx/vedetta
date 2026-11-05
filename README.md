@@ -208,10 +208,16 @@ functional without it, and it is never allowed to produce a verdict.
 
 ## Being a good citizen
 
-`robots.txt` is read before a host is crawled. Requests identify themselves. One
-poll per source per day, conditional where the platform supports it, and detail
-pages fetched only for postings that are actually new — so on a quiet day an
-employer costs a single small request.
+Requests identify themselves. One poll per source per day, and detail pages fetched
+only for postings that are actually new, so on a quiet day an employer costs a single
+small request.
+
+Two gaps, stated rather than hidden. The sitemap adapter fetches `robots.txt`, but
+only to read the `Sitemap:` lines it then walks: it ignores every `Disallow` rule,
+and so does the rest of the program. The Greenhouse, SmartRecruiters and Workday
+adapters never fetch the file at all. And no request is conditional: nothing stores
+an `ETag` or a `Last-Modified`, so a board that has not changed is read again in
+full.
 
 ## Licence
 
