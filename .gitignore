@@ -13,3 +13,27 @@ __pycache__/
 .venv/
 config/*.yaml.bak-*
 config/profile.yaml
+vedetta.egg-info/
+
+# --- Aggiunto il 2026-11-15, applicando la Fase 1 e le patch P1a, P2, P3 ---
+
+# I backup che la procedura di deploy crea accanto a ogni file toccato
+# (APPLICA.md, punto 3 di ogni passo). Sono il ritorno indietro piu veloce e
+# devono restare sul disco, ma non sono una versione: nel repository sarebbero
+# venti copie dello stesso file.
+*.bak-P*
+
+# Lo schema del database di PRODUZIONE. Non contiene dati - 213 righe, zero
+# INSERT, generato leggendo sqlite_master di una copia coerente - ma e la forma
+# del database personale dell'operatore, e la decisione di pubblicarlo o no e
+# sua. Lui ha deciso di no.
+#
+# Il test che lo usa (tests/test_migrate_existing_db.py) NON fallisce senza di
+# esso: il caso [prod] salta dicendo perche, e il caso [repo] continua a girare.
+# Sulla macchina dove il file c'e il test gira per intero, e li sta il suo
+# valore - la migrazione provata su cio che la produzione HA davvero, non su cio
+# che il repository dichiara.
+#
+# Se un giorno si volesse pubblicarlo, basta togliere questa riga: il file e
+# gia scritto per essere leggibile da estranei e dichiara in testa cosa contiene.
+tests/fixtures/schema_prod_20261112.sql

@@ -1,0 +1,221 @@
+-- FROZEN COPY of vedetta.db.SCHEMA at commit ae75d5e. Do not edit, do not regenerate.
+--
+-- This file is the shape of the production database as it stood when it was taken:
+-- a database that already exists and already holds the operator's triage decisions.
+-- tests/test_migrate_existing_db.py builds a database from it, fills it, and then
+-- runs the *current* db.connect() over it, to prove that every later change to
+-- SCHEMA reaches an existing database too (CREATE TABLE IF NOT EXISTS does nothing to
+-- a table that is already there; only MIGRATIONS adds columns to it).
+--
+-- It is a photograph on purpose. If it were read from vedetta.db it would change
+-- together with SCHEMA, the "old" and "new" databases would always be identical, and
+-- the test would prove nothing. When the production schema moves on, add a new frozen
+-- file beside this one rather than editing this one.
+
+PRAGMA journal_mode=WAL;
+PRAGMA foreign_keys=ON;
+
+CREATE TABLE IF NOT EXISTS employer (
+  id            INTEGER PRIMARY KEY,
+  key           TEXT NOT NULL UNIQUE,
+  display_name  TEXT NOT NULL,
+  channel       TEXT NOT NULL DEFAULT 'default',
+  homepage      TEXT,
+  careers_url   TEXT,
+  enabled       INTEGER NOT NULL DEFAULT 1,
+  notes         TEXT
+);
+
+CREATE TABLE IF NOT EXISTS source (
+  id              INTEGER PRIMARY KEY,
+  employer_id     INTEGER NOT NULL REFERENCES employer(id) ON DELETE CASCADE,
+  platform        TEXT NOT NULL,
+  identifier      TEXT NOT NULL,
+  endpoint        TEXT,
+  job_url_pattern TEXT,
+  job_url_exclude TEXT,
+  discovered_by   TEXT NOT NULL DEFAULT 'config',
+  evidence        TEXT,
+  verified_on     TEXT,
+  verified_note   TEXT,
+  enabled         INTEGER NOT NULL DEFAULT 1,
+  health          TEXT NOT NULL DEFAULT 'unknown',
+  UNIQUE (employer_id, platform, identifier)
+);
+
+CREATE TABLE IF NOT EXISTS run (
+  id           INTEGER PRIMARY KEY,
+  started_at   TEXT NOT NULL,
+  finished_at  TEXT,
+  trigger      TEXT NOT NULL DEFAULT 'manual',
+  seeding      INTEGER NOT NULL DEFAULT 0,
+  digest_sent  INTEGER NOT NULL DEFAULT 0,
+  -- running | finished | failed. A run started from the interface happens in a
+  -- background thread, so the page that started it needs a way to ask how it is
+  -- going instead of waiting minutes for an HTTP response.
+  state        TEXT NOT NULL DEFAULT 'finished',
+  -- Touched as the run works. A `running` row whose heartbeat has gone cold means
+  -- the process died mid-run, which is a different thing from still working and has
+  -- to look different.
+  heartbeat_at TEXT,
+  error        TEXT
+);
+
+-- What a run is doing, appended as it goes. A count of finished sources answers
+-- "how far along", but not "what is it doing now" - and on a source with 465 detail
+-- pages to read, that is the only question worth asking.
+CREATE TABLE IF NOT EXISTS run_event (
+  id     INTEGER PRIMARY KEY,
+  run_id INTEGER NOT NULL REFERENCES run(id) ON DELETE CASCADE,
+  at     TEXT NOT NULL,
+  kind   TEXT NOT NULL,            -- source | progress | note | error
+  detail TEXT NOT NULL,
+  done   INTEGER,                  -- for progress: items completed
+  total  INTEGER                   -- for progress: items expected, when known
+);
+CREATE INDEX IF NOT EXISTS run_event_run ON run_event(run_id, id);
+
+CREATE TABLE IF NOT EXISTS source_poll (
+  id          INTEGER PRIMARY KEY,
+  run_id      INTEGER NOT NULL REFERENCES run(id) ON DELETE CASCADE,
+  source_id   INTEGER NOT NULL REFERENCES source(id) ON DELETE CASCADE,
+  -- ok | empty | partial | error. `partial` means the platform answered and the
+  -- postings are usable, but the listing was demonstrably incomplete - a large board
+  -- that changed while being paginated. Kept distinct from `error` because a failure
+  -- notice that is usually nothing teaches the reader to skip failure notices, and
+  -- kept distinct from `ok` because nothing may be closed on an incomplete listing.
+  outcome     TEXT NOT NULL,
+  http_status INTEGER,
+  item_count  INTEGER,
+  duration_ms INTEGER,
+  error       TEXT,
+  -- Something survivable worth saying. `error` stays reserved for why a poll failed,
+  -- so the two are never confused by a reader or by a query.
+  note        TEXT,
+  UNIQUE (run_id, source_id)
+);
+
+CREATE TABLE IF NOT EXISTS posting (
+  id             INTEGER PRIMARY KEY,
+  employer_id    INTEGER NOT NULL REFERENCES employer(id) ON DELETE CASCADE,
+  title          TEXT NOT NULL,
+  title_norm     TEXT NOT NULL,
+  location       TEXT,
+  location_norm  TEXT,
+  url            TEXT,
+  published_at   TEXT,
+  first_seen_run INTEGER NOT NULL REFERENCES run(id),
+  last_seen_run  INTEGER NOT NULL REFERENCES run(id),
+  closed_run     INTEGER REFERENCES run(id),
+  is_pipeline    INTEGER,
+  dup_of         INTEGER REFERENCES posting(id),
+  -- Workability per the reader's profile. 0 means folded out of the default view,
+  -- never deleted: the count is always shown and one click reveals them.
+  workable       INTEGER NOT NULL DEFAULT 1,
+  blocked_by     TEXT,
+  is_remote      INTEGER NOT NULL DEFAULT 0,
+  is_hybrid      INTEGER NOT NULL DEFAULT 0,
+  raw            TEXT
+);
+CREATE INDEX IF NOT EXISTS posting_recon
+  ON posting(employer_id, title_norm, location_norm);
+CREATE INDEX IF NOT EXISTS posting_workable
+  ON posting(workable, closed_run, id);
+
+-- One row per place mentioned by a posting. A free-text location column cannot be
+-- faceted, and a posting routinely names several places.
+CREATE TABLE IF NOT EXISTS posting_place (
+  posting_id INTEGER NOT NULL REFERENCES posting(id) ON DELETE CASCADE,
+  place      TEXT NOT NULL,
+  PRIMARY KEY (posting_id, place)
+);
+CREATE INDEX IF NOT EXISTS posting_place_place ON posting_place(place);
+
+-- Which place is inside which, and which spellings are one place. Derived from the
+-- postings by placetree.rebuild and rewritten whenever the places are, so it can
+-- never describe a set of places that no longer exists.
+--
+-- A table rather than a computation inside the filter query, for two reasons: the
+-- location facet has to expand a country into its cities on every page load, and a
+-- reader who wonders why Dublin sits under Ireland can look.
+CREATE TABLE IF NOT EXISTS place_meta (
+  place  TEXT PRIMARY KEY,          -- as stored in posting_place
+  canon  TEXT NOT NULL,             -- one name per place, for the filter list
+  parent TEXT,                      -- the country it is in, when that is known
+  kind   TEXT NOT NULL              -- region | country | place
+);
+CREATE INDEX IF NOT EXISTS place_meta_parent ON place_meta(parent);
+CREATE INDEX IF NOT EXISTS place_meta_canon ON place_meta(canon);
+
+CREATE TABLE IF NOT EXISTS sighting (
+  id           INTEGER PRIMARY KEY,
+  run_id       INTEGER NOT NULL REFERENCES run(id) ON DELETE CASCADE,
+  source_id    INTEGER NOT NULL REFERENCES source(id) ON DELETE CASCADE,
+  posting_id   INTEGER NOT NULL REFERENCES posting(id) ON DELETE CASCADE,
+  platform_key TEXT NOT NULL,
+  content_hash TEXT NOT NULL,
+  UNIQUE (run_id, source_id, platform_key)
+);
+CREATE INDEX IF NOT EXISTS sighting_key ON sighting(source_id, platform_key);
+
+-- Technologies a posting names, split by whether the reader claims them. Stored
+-- rather than computed on the fly so the terms can be filtered on, which turns a
+-- read-only observation into a way to find work.
+CREATE TABLE IF NOT EXISTS posting_skill (
+  posting_id INTEGER NOT NULL REFERENCES posting(id) ON DELETE CASCADE,
+  term       TEXT NOT NULL,
+  have       INTEGER NOT NULL,
+  PRIMARY KEY (posting_id, term)
+);
+CREATE INDEX IF NOT EXISTS posting_skill_term ON posting_skill(term, have);
+
+CREATE TABLE IF NOT EXISTS label (
+  id          INTEGER PRIMARY KEY,
+  posting_id  INTEGER NOT NULL REFERENCES posting(id) ON DELETE CASCADE,
+  rule_id     TEXT NOT NULL,
+  kind        TEXT NOT NULL,
+  severity    TEXT NOT NULL,
+  value       TEXT,
+  explain     TEXT NOT NULL,
+  produced_by TEXT NOT NULL,
+  confidence  REAL,
+  created_at  TEXT NOT NULL,
+  UNIQUE (posting_id, rule_id, produced_by)
+);
+
+CREATE TABLE IF NOT EXISTS triage (
+  posting_id INTEGER PRIMARY KEY REFERENCES posting(id) ON DELETE CASCADE,
+  state      TEXT NOT NULL,
+  note       TEXT,
+  decided_at TEXT NOT NULL
+);
+
+-- Every stage change, appended and never collapsed. Moving back a stage is
+-- information, and so is having cleared one: deleting either would quietly rewrite
+-- the record of a search.
+CREATE TABLE IF NOT EXISTS triage_event (
+  id         INTEGER PRIMARY KEY,
+  posting_id INTEGER NOT NULL REFERENCES posting(id) ON DELETE CASCADE,
+  state      TEXT NOT NULL,
+  note       TEXT,
+  at         TEXT NOT NULL,
+  source     TEXT NOT NULL DEFAULT 'human'
+);
+CREATE INDEX IF NOT EXISTS triage_event_posting ON triage_event(posting_id, id);
+
+CREATE TABLE IF NOT EXISTS tracker_entry (
+  id            INTEGER PRIMARY KEY,
+  source_file   TEXT NOT NULL,
+  employer_name TEXT NOT NULL,
+  role          TEXT,
+  status        TEXT,
+  applied_on    TEXT,
+  imported_at   TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS tracker_match (
+  posting_id       INTEGER NOT NULL REFERENCES posting(id) ON DELETE CASCADE,
+  tracker_entry_id INTEGER NOT NULL REFERENCES tracker_entry(id) ON DELETE CASCADE,
+  confidence       REAL NOT NULL,
+  PRIMARY KEY (posting_id, tracker_entry_id)
+);

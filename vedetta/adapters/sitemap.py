@@ -51,6 +51,8 @@ POLITE_DELAY = 0.35
 
 class SitemapAdapter(Adapter):
     platform = "sitemap"
+    params = frozenset({"job_url_pattern", "job_url_exclude",
+                        "sitemap_include", "sitemap_exclude", "language"})
 
     def fetch(self, source: dict, known_keys: set[str] | None = None,
               detail_budget: int | None = 150,
@@ -104,7 +106,8 @@ class SitemapAdapter(Adapter):
                 if url in known:
                     # Already recorded. Emitted so the posting is not treated as
                     # closed, but not re-read.
-                    out.append(RawPosting(platform_key=url, title="", url=url))
+                    out.append(RawPosting(platform_key=url, title="", url=url,
+                                          resighting=True))
                     continue
                 if detail_budget is not None and spent >= detail_budget:
                     # Left for the next run rather than guessed at. Skipping it is

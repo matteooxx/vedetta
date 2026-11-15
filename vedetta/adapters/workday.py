@@ -64,7 +64,8 @@ class WorkdayAdapter(Adapter):
                 url = f"{public}{path}" if path else None
 
                 if key in known:
-                    out.append(RawPosting(platform_key=key, title="", url=url))
+                    out.append(RawPosting(platform_key=key, title="", url=url,
+                                          resighting=True))
                     continue
 
                 title = (entry.get("title") or "").strip()

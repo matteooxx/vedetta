@@ -499,3 +499,42 @@ Append-only. One line per change, newest at the bottom.
   read off the live system — the adapter registry, the source counts per platform, the
   table list, the event count — and the ones that had been written from memory were the
   ones that were wrong.
+- 2026-11-13 — **Phase 2, four changes.** The suite stands at 533 passed and 6 xfailed.
+  **P1a, one number for the years.** `experience.max_years_requested` is gone; the gate
+  reads `profile.max_years_experience` from the `profile:` block of `rules.yaml`
+  (`vedetta/labels/engine.py:69`, `:133-135`). A profile that still carries the old key is
+  refused, and the message says where the number lives now (`vedetta/configstore.py:267-281`).
+- 2026-11-13 — **P2, one registry and declared parameters.** `ADAPTERS` lives in
+  `vedetta/adapters/__init__.py` and is a single object that `run` and `configstore` reach
+  (`:17-22`; `tests/test_adapter_contract.py:44-51`). Each adapter declares the source keys it
+  reads in `params` (`vedetta/adapters/base.py:92-96`). `RawPosting` has a `resighting` field
+  where there used to be an implicit convention, an empty title (`base.py:69-71`). The
+  watchlist refuses, by name, a key the platform's adapter does not read, and for a platform
+  with no adapter accepts the union of the declared ones (`configstore.py:410-437`). Two
+  cases that used to vanish without a trace now leave a note, with different texts, on
+  `source_poll.note`, in the report and in the digest: a new posting served with no title,
+  and a re-sighting of a key the database has no record of (`vedetta/run.py:216-226`,
+  `:510-521`, `:546-565`). The contract test is parametrized over `ADAPTERS`, so a new
+  adapter is checked the moment it is registered; see `docs/adding-an-adapter.md`.
+- 2026-11-13 — **P3, the declared parameters reach `fetch`.** A `source.params` column (JSON)
+  holds the declared parameters that have no column of their own; `sync_watchlist` writes it
+  and `source_dict` spreads it back (`vedetta/db.py:46-49`, `:255-257`, `:285-303`;
+  `vedetta/config.py:124-126`, `:162-163`).
+- 2026-11-13 — **P4, the text the engine read is kept, and `relabel` is idempotent.** A
+  `posting_text` table stores, at first sight, exactly the text the engine judged
+  (`vedetta/db.py:132-143`, `vedetta/run.py:473-484`). `relabel` judges again on that text
+  (`run.py:626-633`). For a posting **without** stored text, rule B holds: what cannot be
+  recomputed is not deleted (`run.py:591-606`), and the count of such postings is reported
+  (`vedetta/cli.py:240-241`). The new `backfill-text` command rebuilds the text of
+  Greenhouse postings from `raw` and reports without `--apply` (`vedetta/cli.py:245-273`,
+  `vedetta/backfill.py`). Two new pages describe what these changes make easy:
+  `docs/adding-an-adapter.md` and `docs/adding-a-sector.md`.
+- 2026-11-13 — **A correction to two earlier entries.** The backlog item A2 and the entry
+  of 2026-10-07 above ("Running it found three bugs: ... `accept_level` tested before
+  `reject_level`") declare that bug **corrected. It was not.** `vedetta/profile.py:267-272`
+  still tests `accept_level` first, and a strict `xfail` pins it
+  (`tests/test_profile_level_and_tracks.py:69-75`). The operator's `git log -L` on the
+  function shows one commit, `c499800` of 6 October 2026, which introduced it and listed
+  the bug as fixed in its own message. The fix is P1b, not yet done. Older entries are left
+  as written, and the correction is in `docs/improvements-backlog.md` under A2. Five more
+  findings of this phase, none fixed, are D1–D5 in the same file.

@@ -121,10 +121,11 @@ HOW TO THINK ABOUT THE PARTS THAT ARE EASY TO GET WRONG
   region I accept: a specific rule beats a region, which is exactly what that is
   for. If my CV does not make my citizenship and work authorisation unambiguous,
   ASK - this is the single field most worth getting right.
-- `experience.years` is my own total. `experience.max_years_requested` is the
-  ceiling I am willing to see asked for, which is a different number and usually a
-  little higher: it is what decides whether "8+ years required" counts against a
-  posting.
+- `experience.years` is my own total. It is descriptive: no rule reads it. The
+  ceiling I am willing to see asked for is a different number and lives elsewhere,
+  as `profile.max_years_experience` in the `profile:` block of rules.yaml - that is
+  what decides whether "8+ years required" counts against a posting. Do not write
+  it in profile.yaml.
 - `experience.reject_level` and `accept_level` are matched against the TITLE. Think
   about the words that appear in the titles I should and should not be shown -
   "principal", "head of", "director" against "junior", "graduate", "associate".

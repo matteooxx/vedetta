@@ -1,0 +1,78 @@
+{
+  "jobs": [
+    {
+      "id": 1,
+      "title": "Staff Nurse - Medical Ward",
+      "location": {"name": "Cork, Ireland"},
+      "absolute_url": "https://boards.example/1",
+      "updated_at": "2026-10-01",
+      "content": "Provide patient care on a 28-bed medical ward. Manual handling training is provided. Night shifts on rota.",
+      "departments": [{"name": "Nursing"}]
+    },
+    {
+      "id": 2,
+      "title": "Band 5 Nurse - Emergency Department",
+      "location": {"name": "Dublin, Ireland"},
+      "absolute_url": "https://boards.example/2",
+      "updated_at": "2026-10-02",
+      "content": "Triage and treat walk-in patients. Current manual-handling certificate and first aid essential.",
+      "departments": [{"name": "Nursing"}]
+    },
+    {
+      "id": 3,
+      "title": "Sous Chef",
+      "location": {"name": "Austin, Texas, United States"},
+      "absolute_url": "https://boards.example/3",
+      "updated_at": "2026-10-03",
+      "content": "Run the pass in a busy hotel kitchen. Food hygiene certificate and allergen management required.",
+      "departments": [{"name": "Kitchen"}]
+    },
+    {
+      "id": 4,
+      "title": "Head Chef",
+      "location": {"name": "Dublin, Ireland"},
+      "absolute_url": "https://boards.example/4",
+      "updated_at": "2026-10-04",
+      "content": "Lead a brigade of twelve. Food hygiene Level 2 and menu costing experience.",
+      "departments": [{"name": "Kitchen"}]
+    },
+    {
+      "id": 5,
+      "title": "Store Manager",
+      "location": {"name": "Cork, Ireland"},
+      "absolute_url": "https://boards.example/5",
+      "updated_at": "2026-10-05",
+      "content": "Own the store P&L and a team of fifteen. Cash handling and opening procedures.",
+      "departments": [{"name": "Retail Operations"}]
+    },
+    {
+      "id": 6,
+      "title": "Sales Associate",
+      "location": {"name": "Dublin, Ireland"},
+      "absolute_url": "https://boards.example/6",
+      "updated_at": "2026-10-06",
+      "content": "Serve customers on the shop floor. Cash handling and till reconciliation at close.",
+      "departments": [{"name": "Retail Operations"}]
+    },
+    {
+      "id": 7,
+      "title": "Kitchen Porter",
+      "location": {"name": "Dublin, Ireland"},
+      "absolute_url": "https://boards.example/7",
+      "updated_at": "2026-10-07",
+      "content": "Keep the kitchen clean and washing up on time. Food hygiene training given.",
+      "departments": [{"name": "Catering"}],
+      "metadata": [{"name": "Employment type", "value": "Bank"}]
+    },
+    {
+      "id": 8,
+      "title": "Occupational Therapist",
+      "location": {"name": "Dublin, Ireland"},
+      "absolute_url": "https://boards.example/8",
+      "updated_at": "2026-10-08",
+      "content": "Assess and treat outpatients in a community clinic.",
+      "departments": [{"name": "Rehabilitation"}],
+      "metadata": [{"name": "Level", "value": "Band 6"}]
+    }
+  ]
+}

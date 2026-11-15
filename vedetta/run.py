@@ -17,19 +17,10 @@ from datetime import datetime, timezone
 from . import places as places_mod
 from . import placetree as placetree_mod
 from .skills import SkillMatcher
+from .adapters import ADAPTERS  # the registry object itself, not a copy
 from .adapters.base import AdapterError, normalise
-from .adapters.greenhouse import GreenhouseAdapter
-from .adapters.sitemap import SitemapAdapter
-from .adapters.smartrecruiters import SmartRecruitersAdapter
-from .adapters.workday import WorkdayAdapter
+from .db import source_dict
 from .labels.engine import RuleEngine, now_iso, score
-
-ADAPTERS = {
-    GreenhouseAdapter.platform: GreenhouseAdapter,
-    SitemapAdapter.platform: SitemapAdapter,
-    SmartRecruitersAdapter.platform: SmartRecruitersAdapter,
-    WorkdayAdapter.platform: WorkdayAdapter,
-}
 
 
 def start_run(conn, trigger: str, seeding: bool) -> int:
@@ -71,7 +62,7 @@ def verified_sources(conn) -> list[dict]:
            WHERE s.enabled = 1 AND e.enabled = 1 AND s.verified_on IS NOT NULL
            ORDER BY e.display_name, s.platform"""
     ).fetchall()
-    return [dict(r) for r in rows]
+    return [source_dict(r) for r in rows]
 
 
 def unwatched(conn) -> list[dict]:
@@ -220,9 +211,18 @@ def reconcile(conn, run_id: int, source: dict, item) -> tuple[int, bool]:
                      (run_id, posting_id))
         return posting_id, False
 
+    # Neither of the two returns below is silent: the caller notes every item that
+    # comes back without a posting on the poll, saying which of the two it was.
+    if item.resighting:
+        # Declared "still there, not re-read" - but rule 1 found no record of the key.
+        # known_keys comes from this same table, so this is an adapter fault. There
+        # is no payload to create a posting from.
+        return None, False
+
     if not item.title:
-        # A re-sighting with no payload (the sitemap adapter emits these for URLs it
-        # already knows). There is nothing to reconcile and nothing to create.
+        # A posting the platform served without a title. It cannot be created, and
+        # it is NOT a re-sighting: an empty title used to mean that, implicitly, and
+        # a real new opening disappeared here without a trace.
         return None, False
 
     title_norm = normalise(item.title)
@@ -264,9 +264,9 @@ def reconcile(conn, run_id: int, source: dict, item) -> tuple[int, bool]:
 
 def record_sighting(conn, run_id, source, posting_id, item):
     digest = item.content_hash()
-    if not item.title:
-        # A minimal re-sighting: the sitemap adapter emits these for URLs it already
-        # knows, without re-reading the page. Hashing the empty payload would make
+    if item.resighting:
+        # A minimal re-sighting: three adapters emit these for keys they already
+        # know, without re-reading the posting. Hashing the empty payload would make
         # every one of them look edited the moment edit detection exists, so the
         # previous hash is carried forward instead.
         previous = conn.execute(
@@ -449,9 +449,12 @@ def execute_in(conn, config, run_id: int, reporter=None,
             "outcome": outcome, "count": len(items), "note": note,
             "seeding": source["id"] in seeding_sources,
         })
+        untitled: list[str] = []
+        unknown: list[str] = []
         for item in items:
             posting_id, is_new = reconcile(conn, run_id, source, item)
             if posting_id is None:
+                (unknown if item.resighting else untitled).append(item.platform_key)
                 continue
             record_sighting(conn, run_id, source, posting_id, item)
             if is_new:
@@ -481,6 +484,18 @@ def execute_in(conn, config, run_id: int, reporter=None,
                     "workable": not blocking,
                     "blocked_by": [l.explain for l in blocking],
                 })
+        unplaced = _unplaced_note(untitled, unknown)
+        if unplaced:
+            # On the poll's own note, where the dashboard, the digest and a rebuilt
+            # digest all read it. The outcome stays as it was: nothing was recorded
+            # for these keys, so there is nothing close_missing could wrongly retire,
+            # while `partial` would stop this employer closing anything at all.
+            note = "; ".join(part for part in (note, unplaced) if part)
+            conn.execute("UPDATE source_poll SET note=? WHERE run_id=? AND source_id=?",
+                         (note, run_id, source["id"]))
+            report["polls"][-1]["note"] = note
+            if reporter is not None:
+                reporter.note(f"{source['employer_name']}: {unplaced}")
         conn.commit()
 
     report["closed"] = close_missing(conn, run_id)
@@ -503,6 +518,28 @@ def execute_in(conn, config, run_id: int, reporter=None,
     if finish:
         finish_run(conn, run_id, "finished")
     return report
+
+
+def _unplaced_note(untitled: list[str], unknown: list[str]) -> str | None:
+    """Say what `reconcile` could not place, and which of the two cases it was.
+
+    The distinction is the diagnosis: an untitled posting is the platform's doing, a
+    re-sighting of a key with no record is the adapter's. Keys beyond the first ten
+    are counted rather than listed, so one broken adapter cannot bury the digest.
+    """
+    def keys(found: list[str]) -> str:
+        shown = ", ".join(found[:10])
+        return shown + (f" and {len(found) - 10} more" if len(found) > 10 else "")
+
+    parts = []
+    if untitled:
+        parts.append(f"{len(untitled)} new posting(s) served with no title - nothing "
+                     f"can be recorded without one: {keys(untitled)}")
+    if unknown:
+        parts.append(f"{len(unknown)} posting(s) the adapter reported as already seen "
+                     f"have no record on this source - an adapter fault, nothing "
+                     f"recorded: {keys(unknown)}")
+    return "; ".join(parts) or None
 
 
 def _skill_line(matcher, text: str, employer: str | None = None) -> str | None:

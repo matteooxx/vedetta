@@ -60,7 +60,6 @@ def _at_most_acceptable(bucket: str) -> str:
 class Profile:
     languages: list[str] = field(default_factory=list)
     years: int | None = None
-    max_years_requested: int | None = None
     reject_level: list[str] = field(default_factory=list)
     accept_level: list[str] = field(default_factory=list)
     preferred: list[str] = field(default_factory=list)
@@ -81,7 +80,6 @@ class Profile:
         return cls(
             languages=[str(x).lower() for x in (doc.get("identity") or {}).get("languages") or []],
             years=experience.get("years"),
-            max_years_requested=experience.get("max_years_requested"),
             reject_level=[str(x).lower() for x in experience.get("reject_level") or []],
             accept_level=[str(x).lower() for x in experience.get("accept_level") or []],
             preferred=[str(x) for x in locations.get("preferred") or []],

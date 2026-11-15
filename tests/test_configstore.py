@@ -93,6 +93,61 @@ def test_watchlist_source_needs_platform_and_identifier():
         configstore.validate("watchlist", bad)
 
 
+def _one_source(**source) -> str:
+    import yaml
+    return yaml.safe_dump({"employers": [{"key": "acme", "sources": [
+        {"identifier": "acme", **source}]}]})
+
+
+def test_a_parameter_the_platforms_adapter_does_not_read_is_refused_by_name():
+    """`language` is read by the sitemap adapter only. On a Greenhouse source it
+    saves, syncs and does nothing - the refusal has to name the key and the platform,
+    or the operator is left hunting for which line is wrong."""
+    with pytest.raises(configstore.ConfigError) as info:
+        configstore.validate("watchlist", _one_source(platform="greenhouse",
+                                                      language="fr"))
+    message = str(info.value)
+    assert "'language'" in message
+    assert "greenhouse" in message
+
+
+def test_the_parameters_an_adapter_declares_are_accepted_on_its_own_platform():
+    from vedetta.adapters import ADAPTERS
+    params = {name: "x" for name in ADAPTERS["sitemap"].params}
+    assert params, "precondition: the sitemap adapter declares its parameters"
+    configstore.validate("watchlist", _one_source(platform="sitemap", **params))
+
+
+def test_a_platform_with_no_adapter_yet_accepts_any_declared_parameter():
+    """The plan's decision, and a case that exists in the live watchlist: `ashby`
+    (Mistral AI) and `eightfold` (Microsoft) are kept for the future with no adapter
+    behind them. Refusing their keys would stop the operator saving the whole file
+    from the interface; the runtime already says loudly that the adapter is missing.
+    """
+    configstore.validate("watchlist", _one_source(
+        platform="eightfold", endpoint="https://x.invalid/", language="en",
+        job_url_pattern="/job/"))
+
+
+def test_a_profile_with_max_years_requested_is_refused_and_says_where_it_went():
+    """The key was read by nothing; the years gate reads rules.yaml. An operator who
+    kept the two in step by hand did so for a number that did nothing. The refusal
+    must name the real home of the number, not just say "unknown key"."""
+    old = "experience:\n  years: 1\n  max_years_requested: 2\n"
+    with pytest.raises(configstore.ConfigError) as info:
+        configstore.validate("profile", old)
+    message = str(info.value)
+    assert "experience.max_years_requested" in message
+    assert "rules.yaml" in message
+    assert "profile.max_years_experience" in message
+
+
+def test_the_descriptive_profile_keys_are_still_accepted():
+    doc = configstore.validate(
+        "profile", "identity:\n  languages: [english]\nexperience:\n  years: 1\n")
+    assert doc["experience"]["years"] == 1
+
+
 # --- reading and the example fallback -------------------------------------
 
 def test_read_falls_back_to_the_example(config_dir):

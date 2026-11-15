@@ -10,6 +10,7 @@ here rather than left to discipline:
 """
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 
@@ -42,6 +43,10 @@ CREATE TABLE IF NOT EXISTS source (
   verified_note   TEXT,
   enabled         INTEGER NOT NULL DEFAULT 1,
   health          TEXT NOT NULL DEFAULT 'unknown',
+  -- JSON object: the parameters the source's adapter declares (Adapter.params) that
+  -- have no column of their own. Written by config.sync_watchlist, spread back into
+  -- the source dict by source_dict() below. NULL when there are none.
+  params          TEXT,
   UNIQUE (employer_id, platform, identifier)
 );
 
@@ -234,6 +239,9 @@ MIGRATIONS = {
         "heartbeat_at": "TEXT",
         "error": "TEXT",
     },
+    "source": {
+        "params": "TEXT",
+    },
     "source_poll": {
         "note": "TEXT",
     },
@@ -259,6 +267,27 @@ def _migrate(conn: sqlite3.Connection) -> list[str]:
     if applied:
         conn.commit()
     return applied
+
+
+def source_dict(row) -> dict:
+    """A `source` row as the adapter reads it: columns, plus `params` spread out.
+
+    The one place the JSON is read back. Every reader of `SELECT s.*` that hands the
+    result to an adapter or a page goes through here, so they all see the same thing.
+    A stored parameter that collides with another key of the row is refused loudly:
+    one of the two values would otherwise be dropped without a word.
+    """
+    source = dict(row)
+    raw = source.pop("params", None)
+    if raw:
+        extra = json.loads(raw)
+        clash = sorted(set(extra) & set(source))
+        if clash:
+            raise ValueError(
+                f"source {source.get('id')}: stored params {clash} collide with "
+                f"other fields of the row")
+        source.update(extra)
+    return source
 
 
 def connect(path: str | Path) -> sqlite3.Connection:

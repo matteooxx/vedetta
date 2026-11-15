@@ -1,0 +1,32 @@
+# Synthetic rules for the non-tech fixture. Clusters read the title, as the shipped
+# rules do. Nothing here is a recommendation for any real profession.
+profile:
+  max_years_experience: 3
+
+rules:
+  - id: cluster-patient-care
+    field: title
+    weight: 5
+    kind: cluster
+    severity: positive
+    explain: "patient care"
+    when:
+      - '(?i)\b(nurse|nursing|midwife|healthcare assistant|care assistant|therapist|radiographer)\b'
+
+  - id: cluster-counter-sales
+    field: title
+    weight: 5
+    kind: cluster
+    severity: positive
+    explain: "sales at the counter"
+    when:
+      - '(?i)\b(sales associate|sales assistant|cashier|shop assistant)\b'
+
+  - id: cluster-kitchen
+    field: title
+    weight: 5
+    kind: cluster
+    severity: positive
+    explain: "kitchen"
+    when:
+      - '(?i)\b(chef|cook|commis)\b'

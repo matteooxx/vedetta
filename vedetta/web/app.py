@@ -244,7 +244,7 @@ def create_app() -> Flask:
     def sources():
         cfg = load_config()
         conn = open_db(cfg)
-        rows = [dict(r) for r in conn.execute(
+        rows = [db_mod.source_dict(r) for r in conn.execute(
             """SELECT s.*, e.display_name AS employer, e.careers_url
                FROM source s JOIN employer e ON e.id = s.employer_id
                ORDER BY (s.verified_on IS NULL) DESC, e.display_name""").fetchall()]
@@ -269,7 +269,7 @@ def create_app() -> Flask:
         conn.close()
         if row is None:
             abort(404)
-        source = dict(row)
+        source = db_mod.source_dict(row)
         adapter_cls = run_mod.ADAPTERS.get(source["platform"])
         if adapter_cls is None:
             flash(f"No adapter for '{source['platform']}' yet, so this source cannot "

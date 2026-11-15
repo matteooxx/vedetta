@@ -17,12 +17,14 @@
 # ---------------------------------------------------------------------------
 
 identity:
-  # Used in explanations and by the language gate in rules.yaml.
+  # Descriptive only: no rule reads this. The language gate in rules.yaml has its
+  # languages written into its own patterns.
   languages: [english]
 
 experience:
-  years: 1                   # roughly what you have
-  max_years_requested: 2     # a posting asking for more gets flagged
+  years: 1                   # roughly what you have; descriptive, no rule reads it
+  # The number that flags a posting asking for too many years is NOT here. It is
+  # `profile.max_years_experience` in rules.yaml, which is what the years gate reads.
 
   # Matched against the posting TITLE, word by word.
   accept_level: [graduate, entry, associate, junior, intern, trainee]

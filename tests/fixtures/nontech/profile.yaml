@@ -1,0 +1,28 @@
+# Synthetic profile for a non-tech reader: hospitality, retail and nursing mixed.
+# Written by someone who knows the tech side of this project, not these trades.
+identity:
+  languages: [english]
+
+experience:
+  years: 2
+  max_years_requested: 3
+  # Phrases and single words, matched whole against the TITLE.
+  accept_level: [staff nurse, band 5, band 6, sous chef, associate, trainee]
+  reject_level: [head chef, manager, band 8]
+
+locations:
+  preferred: [Dublin, Cork]
+  acceptable: [Ireland]
+  excluded: [United States]
+
+tracks:
+  require_match: true
+
+exclude_if:
+  - no-target-track
+  - location-excluded
+  - level-too-senior
+
+skills:
+  have: [food hygiene, manual handling, cash handling, patient care]
+  watch: [allergen management, first aid, Level 2 Food Safety]

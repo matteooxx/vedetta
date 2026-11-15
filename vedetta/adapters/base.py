@@ -66,6 +66,9 @@ class RawPosting:
     published_at: str | None = None
     text: str = ""
     raw: dict = field(default_factory=dict)
+    # "Still there, not re-read": a key from `known_keys`, emitted with no payload so
+    # the posting is not taken for closed. See `Adapter.fetch`.
+    resighting: bool = False
 
     def content_hash(self) -> str:
         blob = json.dumps(
@@ -86,6 +89,11 @@ class AdapterError(RuntimeError):
 
 class Adapter:
     platform: str = "base"
+    # The source keys this adapter reads beyond the generic ones every source has
+    # (platform, identifier, endpoint, the verification fields). The watchlist
+    # validator refuses any of them on a source of another platform, by name: a key
+    # the adapter never reads saves cleanly and then does nothing.
+    params: frozenset[str] = frozenset()
 
     def __init__(self, timeout: float = 25.0):
         self.timeout = timeout
@@ -201,6 +209,22 @@ class Adapter:
         adapter that has to fetch a second request per posting to get its text uses
         this to avoid re-reading what it already knows, emitting a minimal entry
         instead so the posting is not mistaken for closed.
+
+        That minimal entry is a **re-sighting**, and it is said with the flag:
+        ``RawPosting(platform_key=key, title="", url=url, resighting=True)``. The
+        runner then keeps the posting open, creates nothing, and carries the previous
+        content hash forward instead of hashing the empty payload. Only flag a key
+        that is in ``known_keys``: a re-sighting the database has no record of
+        cannot become a posting, and is dropped with a note on the poll.
+
+        An empty title does **not** mean re-sighting. It used to, implicitly, and a
+        real new posting served without a title vanished with no trace. Now a
+        non-flagged item with an empty title is dropped with a note on the poll too:
+        a posting cannot be created without a title, but its absence is reported.
+
+        ``text`` is what the body rules and the skill matcher read. Left empty, they
+        read the title instead - so an adapter that has the advert text should put
+        title, location and text together here, as the existing ones do.
 
         ``detail_budget`` caps how many of those second requests one run may make.
         ``None`` means no cap, which is what a first pass over a source wants: a cap

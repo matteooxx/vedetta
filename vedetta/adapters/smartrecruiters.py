@@ -53,7 +53,8 @@ class SmartRecruitersAdapter(Adapter):
                     continue
                 if key in known:
                     out.append(RawPosting(platform_key=key, title="",
-                                          url=self._public_url(entry, identifier)))
+                                          url=self._public_url(entry, identifier),
+                                          resighting=True))
                     continue
 
                 title = (entry.get("name") or "").strip()

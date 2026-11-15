@@ -27,7 +27,7 @@ project exists to prevent; a fold behind a visible number is not.
 
 Result on live data: **4,617 postings → 273 workable.**
 
-### A2 — Three bugs found by running it **done**
+### A2 — Three bugs found by running it **done, except the second: that claim is false**
 
 - Two `style` attributes on the triage buttons, so the chosen state never rendered.
 - `accept_level` was tested before `reject_level`, which read "Associate Renewals
@@ -35,6 +35,27 @@ Result on live data: **4,617 postings → 273 workable.**
 - The profile labelled the right *level* as a `cluster`, so `tracks.require_match`
   was satisfied by "Trainee Accountant". The same mistake had just been corrected in
   `rules.yaml` and was reproduced in the profile module.
+
+> **Correction, 2026-11-13 — the second bullet is a false statement, not history.** This
+> entry and the changelog entry dated 2026-10-07 ("Running it found three bugs: ...
+> `accept_level` tested before `reject_level`") both say the bug was *corrected*. **It was
+> not.** What I can verify from the working tree:
+>
+> - `vedetta/profile.py:267-272` still tests `accept_level` (`:267-269`) before
+>   `reject_level` (`:270-272`);
+> - `tests/test_profile_level_and_tracks.py:69-75` is a *strict* `xfail` that asserts the
+>   opposite order and says in its own comment "Commit c499800 announced this as fixed; the
+>   code was never changed".
+>
+> What the operator verified with `git log -L265,275:vedetta/profile.py` (I could not run
+> git in this pass, so this part is theirs, not mine): it returns **a single commit,
+> `c499800`, dated 6 October 2026**. That is the commit that *introduced* the function, and
+> its own message lists this bug among the three "found and corrected". The code at that
+> commit is identical to today's. There was no later fix to point at.
+>
+> The correction arrives with **P1b**, which reverses the order (reject first); until
+> then the bug is open and a title holding words from both lists reads `accept`. When P1b
+> lands, the strict `xfail` above must be removed or the suite goes red; that is intended.
 
 ### A3 — `vedetta relabel` **done**
 
@@ -464,6 +485,95 @@ string, so **from that day the rules file could not be saved from the interface 
 all**: it raised a TypeError rather than reporting anything. No test had ever put a
 shipped example file through `validate`. Two now do, one from each side, so the keys
 and the examples cannot drift apart.
+
+---
+
+## Found during Phase 2, not fixed (2026-11-13)
+
+Six findings. D1–D5 are not changes in behaviour made by P1–P4; D6 is a limit of rule B
+as P4 and P4b wrote it. Each was read in the code, and where a fact comes from the
+operator's look at production rather than from this repository, it says so.
+
+### D1 — `placetree.derive` settles tied votes by the order of a `set`
+
+For a place with no table parent, the parent country is the one with the most
+co-occurrence votes (`vedetta/placetree.py:61-72`, `:80-86`). The countries of one posting
+are collected in a `set` (`:66`) and iterated to add the votes (`:71`), and
+`Counter.most_common(1)` (`:81`) returns, among equal counts, the one inserted first. A
+`set` of strings iterates in an order that depends on the process's hash seed, so on a tie
+the chosen country differs **between processes, on identical input**.
+
+The operator ran it with three different `PYTHONHASHSEED` values: the parent of 10 to 21
+places changed between them. (I read the code path above but did **not** reproduce the
+numbers; setting that variable was not possible in this pass.) `rebuild` runs at the end
+of every run and every relabel (`run.py:527`, `:652`), so it happens daily. It can take
+postings out of a view filtered by country, because selecting a country matches what is
+inside it (B11 above).
+
+**Not an effect of P4**: the code is the B11 code, pre-existing. It deserves its own patch.
+
+### D2 — `discovered_by` is never updated and `evidence` is never written
+
+`sync_watchlist` inserts `discovered_by` (`vedetta/config.py:165-166`, `:180`) but leaves it
+out of the `DO UPDATE` list (`:169-176`), so an edit in the watchlist never reaches an
+existing row; a test pins this and calls it "a photograph, not an endorsement"
+(`tests/test_source_params.py:201-204`). `evidence` is a column (`vedetta/db.py:41`) that
+appears nowhere in the insert (`config.py:164-185`) at all. The watchlist validator
+accepts both keys (`configstore.py:181-182`), so an operator can write them, see them
+saved, and believe the database follows. **P3 does not fix either.**
+
+### D3 — Workday and SmartRecruiters, with the detail budget spent, record the posting without its body
+
+When `spent` reaches `detail_budget` the adapter skips the second request and still emits
+the posting: Workday builds its text from `[title, location]` only (`workday.py:73`,
+`:75-95`); SmartRecruiters from title, location and labels (`smartrecruiters.py:62-79`).
+That posting is new, so its thin text is stored (`run.py:473-484`); from then on its key
+is known, so later runs emit a re-sighting for it (`workday.py:66-69`,
+`smartrecruiters.py:54-57`) and **the body is never read**. Rules scoped to the body, and
+the skill line, never see it, and `relabel` keeps judging the stored thin text
+(`run.py:626-633`). No note is left on the poll: the two notes in `workday.py` (`:159`,
+`:177`) are about the listing, not the budget. The budget is 150 on a source that has been
+seen before, none on a first pass (`run.py:131`).
+
+The sitemap adapter does the right thing: past the budget it skips the posting, so it
+arrives, whole, on a later run (`sitemap.py:112-116`).
+
+### D4 — `raw` is cut at 200,000 characters *after* serialisation
+
+`json.dumps(item.raw)[:200000]` (`vedetta/run.py:260`) can end in the middle of a value, so
+the stored text is no longer JSON. After P4 `relabel` does not read `raw` any more
+(`run.py:626`), so this no longer corrupts labels, but the cell stays unreadable;
+`backfill-text` counts such Greenhouse rows apart as `unreadable` (`backfill.py:34`,
+`:82-84`) and the suite builds one on purpose (`tests/test_relabel.py:449-451`).
+
+The operator checked production: **no `raw` there is today unreadable or truncated.** That
+is not visible from this repository.
+
+### D5 — A live `greenhouse` source has the wrong identifier and fails every run
+
+Reported from the operator's production watchlist (the identifier is private
+configuration and is not in this repository): the source fails on every run with
+`board 'doctolib' not found (404)`. The message is the one the adapter raises for a 404
+(`vedetta/adapters/greenhouse.py:42-47`), recorded as an `error` poll
+(`run.py:134-138`), so it is a daily failure line in the digest. This is
+**configuration, not code**: the identifier is wrong, not the employer quiet.
+
+### D6 — A kept `seniority-threshold` is not compared with the threshold again
+
+Found by the independent review of P4. For a posting without a row in `posting_text`,
+`relabel` keeps the labels its body gave (rule B, `vedetta/run.py`, `relabel`, point 3).
+`_kept_label` (`run.py`, below `relabel`) carries the old `value` and rewords the label
+as the rule is now, but does not compare that value with the current limit. Raise
+`max_years_experience` (the `profile` block of `rules.yaml`) and `seniority-threshold`
+stays on those postings even where the stored value is now at or under the new limit.
+Lowering it does not add the label either: since P4b a rule that reads the body is not
+judged without a text at all, and `seniority-threshold` is `field: body`.
+
+Not fixed in P4b, on purpose: one cause per patch. Today the rule is not in
+`exclude_if`, so the effect is on the score only, and no posting is hidden by it. It
+becomes a hiding bug the day `seniority-threshold` goes into `exclude_if`. The repair
+would re-apply `compare` to the kept `value` - for the removing direction only, which is
+the one the stored value can decide.
 
 ---
 

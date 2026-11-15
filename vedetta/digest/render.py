@@ -152,6 +152,13 @@ def render_text(report: dict, config=None) -> str:
     for poll in empty:
         lines.append(f"  EMPTY   {poll['employer']} ({poll['platform']}) - "
                      "a board with no postings, or a wrong identifier")
+    # A note on a poll that otherwise went well: something survivable worth saying,
+    # such as a posting served without a title that could not be recorded. Printed
+    # only here, never in the subject - it is not a failure.
+    for poll in ok + empty:
+        if poll.get("note"):
+            lines.append(f"  NOTE    {poll['employer']} ({poll['platform']})")
+            lines.append(f"          {poll['note']}")
     if report.get("unwatched"):
         lines.append("")
         lines.append("NOT WATCHED - no confirmed route exists for these employers:")

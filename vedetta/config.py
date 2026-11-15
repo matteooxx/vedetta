@@ -8,6 +8,7 @@ runs unchanged wherever it is deployed (ADR-0015).
 """
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -117,7 +118,13 @@ def sync_watchlist(conn, watchlist: dict) -> dict:
     without one is stored but will never be polled -- enrolment stays a human act,
     enforced by the query in run.py rather than by discipline.
     """
+    from .adapters import ADAPTERS
+
     counts = {"employers": 0, "sources": 0, "unverified": 0}
+    # A declared parameter with a column of its own (job_url_pattern, job_url_exclude)
+    # is written there; the rest go into `params` as JSON. The two job_url_* stay
+    # columns on purpose: moving them would migrate production data for no gain.
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(source)")}
     for entry in watchlist.get("employers") or []:
         key = entry.get("key")
         if not key:
@@ -150,24 +157,30 @@ def sync_watchlist(conn, watchlist: dict) -> dict:
             verified = source.get("verified_on")
             if not verified:
                 counts["unverified"] += 1
+            adapter = ADAPTERS.get(platform)
+            declared = adapter.params if adapter is not None else frozenset()
+            extra = {name: source[name] for name in sorted(declared - columns)
+                     if source.get(name) is not None}
             conn.execute(
                 """INSERT INTO source (employer_id, platform, identifier, endpoint,
                         job_url_pattern, job_url_exclude, discovered_by, verified_on,
-                        verified_note, enabled)
-                   VALUES (?,?,?,?,?,?,?,?,?,?)
+                        verified_note, enabled, params)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(employer_id, platform, identifier) DO UPDATE SET
                      endpoint=excluded.endpoint,
                      job_url_pattern=excluded.job_url_pattern,
                      job_url_exclude=excluded.job_url_exclude,
                      verified_on=excluded.verified_on,
                      verified_note=excluded.verified_note,
-                     enabled=excluded.enabled""",
+                     enabled=excluded.enabled,
+                     params=excluded.params""",
                 (
                     employer_id, platform, str(identifier), source.get("endpoint"),
                     source.get("job_url_pattern"), source.get("job_url_exclude"),
                     source.get("discovered_by") or "config",
                     str(verified) if verified else None,
                     source.get("verified_note"), int(source.get("enabled", True)),
+                    json.dumps(extra, sort_keys=True) if extra else None,
                 ),
             )
             counts["sources"] += 1

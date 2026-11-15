@@ -31,6 +31,8 @@ from pathlib import Path
 
 import yaml
 
+from .adapters import ADAPTERS  # the registry itself, see adapters/__init__.py
+
 try:  # comment-preserving round trip, used only by the editor
     from ruamel.yaml import YAML as _RuamelYAML
 
@@ -113,11 +115,26 @@ _YEARS = re.compile(r"\(\?i\)|\(\?:|\\")  # presence of regex syntax, used as a 
 # every example file appears here, so the two cannot drift apart.
 #
 # `[]` in a path means "each item of this list".
+#
+# The source keys a particular adapter reads are not written out here: they come from
+# the adapters' own `params`, so declaring a parameter on an adapter is the one place
+# it has to be added. Which platform may carry which is `_validate_watchlist`'s job.
+
+
+def _adapter_params() -> frozenset[str]:
+    """Every source key some adapter declares it reads."""
+    return frozenset().union(*(cls.params for cls in ADAPTERS.values()))
+
+
 KNOWN_KEYS = {
     "profile": {
         "identity", "identity.name", "identity.languages", "identity.notes",
-        "experience", "experience.years", "experience.max_years_requested",
-        "experience.max_years_experience",
+        # `identity.languages` and `experience.years` are descriptive: they are
+        # kept as data about the reader and NO rule reads them (the language gate
+        # has its languages in its regex; the years gate reads
+        # `profile.max_years_experience` in rules.yaml). Listed here so the shipped
+        # example validates, as `trackers` is below.
+        "experience", "experience.years",
         "experience.accept_level", "experience.reject_level",
         "locations", "locations.preferred", "locations.acceptable",
         "locations.conditional", "locations.excluded",
@@ -164,11 +181,7 @@ KNOWN_KEYS = {
         "employers[].sources[].endpoint", "employers[].sources[].discovered_by",
         "employers[].sources[].evidence", "employers[].sources[].verified_on",
         "employers[].sources[].verified_note", "employers[].sources[].enabled",
-        "employers[].sources[].job_url_pattern",
-        "employers[].sources[].job_url_exclude",
-        "employers[].sources[].sitemap_include",
-        "employers[].sources[].sitemap_exclude",
-        "employers[].sources[].language",
+        *(f"employers[].sources[].{name}" for name in _adapter_params()),
     },
 }
 
@@ -222,6 +235,11 @@ def validate(name: str, text: str) -> dict:
     if not isinstance(doc, dict):
         raise ConfigError("the document must be a mapping at the top level")
 
+    # Before the generic unknown-key check, which would otherwise answer first with a
+    # message that does not say where the number went.
+    if name == "profile":
+        _refuse_moved_keys(doc)
+
     strays = unknown_keys(name, doc)
     if strays:
         lines = []
@@ -246,6 +264,23 @@ def validate(name: str, text: str) -> dict:
     return doc
 
 
+def _refuse_moved_keys(doc: dict) -> None:
+    """Refuse a profile that still carries `experience.max_years_requested`.
+
+    That key was read by nothing. The years gate reads `max_years_experience` from the
+    `profile:` block of rules.yaml, so a number written here looked like a setting and
+    did nothing - and an operator kept the two in step by hand without knowing one was
+    dead. A bare "unknown key" would not say where the number lives now.
+    """
+    experience = doc.get("experience")
+    if isinstance(experience, dict) and "max_years_requested" in experience:
+        raise ConfigError(
+            "'experience.max_years_requested' is no longer read by anything. The "
+            "number that decides whether \"N+ years required\" counts against a "
+            "posting is 'profile.max_years_experience' in the `profile:` block of "
+            "rules.yaml. Set it there and delete this line from profile.yaml.")
+
+
 def _validate_profile(doc: dict) -> None:
     locations = doc.get("locations") or {}
     if not isinstance(locations, dict):
@@ -257,9 +292,8 @@ def _validate_profile(doc: dict) -> None:
     experience = doc.get("experience") or {}
     if not isinstance(experience, dict):
         raise ConfigError("'experience' must be a mapping")
-    for key in ("years", "max_years_requested"):
-        if experience.get(key) is not None and not isinstance(experience[key], int):
-            raise ConfigError(f"'experience.{key}' must be a whole number")
+    if experience.get("years") is not None and not isinstance(experience["years"], int):
+        raise ConfigError("'experience.years' must be a whole number")
     skills = doc.get("skills")
     if skills is not None:
         if not isinstance(skills, dict):
@@ -370,6 +404,37 @@ def _validate_watchlist(doc: dict) -> None:
             if not source.get("platform") or not source.get("identifier"):
                 raise ConfigError(
                     f"employer '{key}': a source needs both 'platform' and 'identifier'")
+            _refuse_foreign_params(key, source)
+
+
+def _refuse_foreign_params(employer: str, source: dict) -> None:
+    """Refuse a parameter that this source's adapter does not read, naming it.
+
+    `language` on a Greenhouse source passes the key check - the sitemap adapter reads
+    it - then saves, syncs, and does nothing. Refused here with its name, the platform,
+    and who does read it.
+
+    A platform with no adapter in this build is checked against no adapter at all:
+    every declared parameter is accepted. That is a decision, and the live watchlist
+    is why - it keeps `ashby` and `eightfold` sources for the future, and refusing
+    their keys would stop the whole file being saved from the interface. The runtime
+    already says loudly that the adapter is missing (run.poll).
+    """
+    platform = source["platform"]
+    adapter = ADAPTERS.get(platform)
+    if adapter is None:
+        return
+    foreign = sorted((set(source) & _adapter_params()) - adapter.params)
+    if not foreign:
+        return
+    readers = {name: sorted(p for p, cls in ADAPTERS.items() if name in cls.params)
+               for name in foreign}
+    listed = ", ".join(f"'{name}' (read only by: {', '.join(readers[name])})"
+                       for name in foreign)
+    raise ConfigError(
+        f"employer '{employer}': a {platform} source carries {listed}. The "
+        f"{platform} adapter never reads it, so it would save cleanly and do "
+        f"nothing. Remove it from this source.")
 
 
 def _validate_settings(doc: dict) -> None:

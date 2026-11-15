@@ -17,6 +17,17 @@
 > request, and the table it had created was left behind rather than dropped. It is not
 > in the shipped schema.
 >
+> Step 0.5 confirmed that against the live database: production holds **36** objects
+> against the **33** of the schema as shipped then (the repository at `ae75d5e`), and the
+> three are that orphan table, its index and its autoindex. The repository keeps both
+> schemas frozen as test fixtures (`tests/fixtures/schema_ae75d5e.sql`,
+> `tests/fixtures/schema_prod_20261112.sql`, the second "read from sqlite_master on
+> 2026-11-12": `tests/test_migrate_existing_db.py:20-24`). I loaded each into an in-memory
+> SQLite: 33 and 36 objects, the extra three named `mail_observation`,
+> `mail_observation_open` and `sqlite_autoindex_mail_observation_1`. The live read itself is
+> step 0.5's and is not repeated here. Since P4 the shipped schema has 34 objects (16 tables
+> and 18 indexes, counted the same way), the new one being `posting_text`.
+>
 > The event storming below needed no revision, which is the part worth noticing: the
 > sixteen domain events in time order survived implementation unchanged.
 
@@ -242,6 +253,30 @@ failure this project exists to prevent.
 
 **`rule_id` is a string from a file.** Not an enum in code. That is ADR-0013 made
 structural: adding a gate is editing a data file.
+
+### Two additions after the design (Phase 2)
+
+The SQL above is the step-E intent and is left as it was; `vedetta/db.py` is the
+authority. Two things arrived in Phase 2 that it does not show.
+
+**`source.params`**, a nullable `TEXT` column holding a JSON object: the source keys the
+platform's adapter declares in `Adapter.params` that have no column of their own
+(`vedetta/db.py:46-49`; added to existing databases by `MIGRATIONS`, `db.py:255-257`).
+`sync_watchlist` writes it, `NULL` when there are none (`vedetta/config.py:162-163`,
+`:183`), and `source_dict` spreads it back into the dict `fetch` receives, refusing a stored
+key that collides with another field of the row (`db.py:285-303`). `job_url_pattern` and
+`job_url_exclude` stay columns of their own (`config.py:124-126`).
+
+**`posting_text`**, one row per posting: `posting_id` (primary key, references `posting`,
+`ON DELETE CASCADE`), `text`, `origin`, `stored_at` (`db.py:132-143`). It holds the text
+the rule engine read when the posting was first seen, kept whole so that `relabel` judges
+the same words again. `origin` is `first-sight`, `title-fallback` (the adapter gave no
+text, so the title was read as the body) or `backfill-greenhouse`
+(`db.py:137`; `vedetta/run.py:478-484`; `vedetta/backfill.py:26`). It is its own table, not a
+column of `posting`, and **a missing row means "never stored"**, which `relabel` treats
+differently from a stored title: for a posting with no row, what cannot be recomputed is
+not deleted (`db.py:132-136`; `run.py:591-606`). A row stored by first sight is never
+overwritten by `backfill-text` (`backfill.py:90-93`).
 
 ## Reconciliation
 
