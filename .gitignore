@@ -37,3 +37,41 @@ vedetta.egg-info/
 # Se un giorno si volesse pubblicarlo, basta togliere questa riga: il file e
 # gia scritto per essere leggibile da estranei e dichiara in testa cosa contiene.
 tests/fixtures/schema_prod_20261112.sql
+
+# --- Aggiunto il 2026-11-16, su richiesta dell'operatore ---
+
+# IL MATERIALE DI LAVORO NON ENTRA IN QUESTO REPOSITORY. MAI.
+#
+# Questo repository e pubblico. Il lavoro di pianificazione e di revisione che ha
+# prodotto il codice - i brief dati agli agenti, i piani che si sono scritti in
+# parallelo e attaccati a vicenda, gli arbitrati, i rapporti, i registri delle
+# simulazioni e i verdetti grezzi - vive in un workspace separato
+# (vedetta-masterplan) che NON HA REMOTE, per scelta, e in un bundle sul NAS.
+#
+# Alla data in cui questa riga e stata scritta nulla di tutto cio era mai entrato
+# qui: 33 commit, e i soli percorsi mai rimossi erano tre file di una funzione
+# mailbox ritirata. Queste righe servono a che resti vero se un giorno qualcuno
+# copia un file di lavoro dentro src/ per comodita: git non lo tracciera, invece
+# di tracciarlo in silenzio.
+#
+# Cosa resta pubblico di proposito: il codice, i test, docs/ (la documentazione
+# del progetto, comprese le ADR e il backlog), e gli esempi di configurazione.
+briefs/
+fase1/
+libero/
+simulazione/
+patchset/
+documentazione/
+prod-copy/
+fonti/
+plan_v*.md
+review_v*.md
+arbitrato*.md
+plan_final.md
+PIANO*.md
+CONFRONTO*.md
+ARBITRATO.md
+CHECKPOINT.md
+CONSEGNA.md
+*.verdicts.jsonl
+*.bundle
