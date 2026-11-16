@@ -5,6 +5,8 @@
     vedetta run --stdout  the same, printing instead of sending
     vedetta check         read-only integrity report
     vedetta dedupe        postings stored twice because a source answered twice
+    vedetta relabel       re-apply rules and profile to stored postings
+    vedetta backfill-text store the text of older postings, where raw still has it
     vedetta digest --run N  rebuild and queue a run's digest that never went out
 """
 from __future__ import annotations
@@ -12,6 +14,7 @@ from __future__ import annotations
 import argparse
 import sys
 
+from . import backfill as backfill_mod
 from . import config as config_mod
 from . import db as db_mod
 from . import dedupe as dedupe_mod
@@ -220,11 +223,62 @@ def cmd_relabel(args) -> int:
     """
     cfg = _load(args)
     conn = db_mod.connect(cfg.db_path)
-    stats = run_mod.relabel(conn, cfg)
+    # The run's lock, as cmd_run takes it: a relabel rewrites every posting's labels
+    # in one transaction, and a run writing at the same time would wait, then fail.
+    lock_path = cfg.db_path.parent / "run.lock"
+    try:
+        with acquire(lock_path, owner="cli:relabel"):
+            stats = run_mod.relabel(conn, cfg)
+    except RunInProgress as exc:
+        print(f"skipped: {exc}", file=sys.stderr)
+        conn.close()
+        return 3
     conn.close()
     print(f"re-evaluated {stats['postings']} postings against the current configuration")
     print(f"  workable : {stats['workable']}")
     print(f"  excluded : {stats['excluded']} (folded out of the default view, not deleted)")
+    print(f"  {stats['without_text']} without a stored text: the profile and the "
+          f"`field: title` rules judged on the title; rules that read the body NOT "
+          f"re-evaluated on these - their stored verdicts stay, labels and their "
+          f"absence, and their skills are left as they were")
+    return 0
+
+
+def cmd_backfill_text(args) -> int:
+    """Store the text of postings collected before posting_text existed, where it can
+    be rebuilt from `raw` - Greenhouse only. Reports by default; writes with --apply.
+    """
+    cfg = _load(args)
+    conn = db_mod.connect(cfg.db_path)
+    if args.apply:
+        lock_path = cfg.db_path.parent / "run.lock"
+        try:
+            with acquire(lock_path, owner="cli:backfill-text"):
+                report = backfill_mod.backfill(conn, apply=True)
+        except RunInProgress as exc:
+            print(f"skipped: {exc}", file=sys.stderr)
+            conn.close()
+            return 3
+    else:
+        report = backfill_mod.backfill(conn, apply=False)
+    conn.close()
+
+    print(f"read {report.read} posting(s) with no stored text "
+          f"({report.already_stored} already had one, left as they are)")
+    print(f"  with text    : {report.with_text} (rebuilt from the Greenhouse job in raw)")
+    print(f"  without text : {report.without_text} (no body in raw: relabel keeps "
+          f"what their body said)")
+    print(f"  unreadable   : {report.unreadable} (Greenhouse, but raw is not a "
+          f"readable job, e.g. cut at 200,000 characters)")
+    for platform, counts in sorted(report.by_platform.items()):
+        print(f"    {platform:<16} " + ", ".join(f"{k.replace('_', ' ')} {v}"
+                                                  for k, v in counts.items()))
+    print()
+    if args.apply:
+        print(f"{report.with_text} text(s) stored.")
+    else:
+        print("Nothing written. Re-run with --apply to store the rebuilt texts; then")
+        print("relabel, so the postings are judged on them.")
     return 0
 
 
@@ -312,6 +366,13 @@ def main(argv=None) -> int:
     dedupe_parser.add_argument("--show", type=int, default=10, metavar="N",
                                help="how many pairs to list (default 10)")
     dedupe_parser.set_defaults(func=cmd_dedupe)
+
+    backfill_parser = sub.add_parser(
+        "backfill-text", help="store the text of postings collected before it was kept "
+                              "(Greenhouse only)")
+    backfill_parser.add_argument("--apply", action="store_true",
+                                 help="make the change (reports only without it)")
+    backfill_parser.set_defaults(func=cmd_backfill_text)
 
     sub.add_parser("check").set_defaults(func=cmd_check)
 

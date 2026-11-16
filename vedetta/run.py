@@ -20,7 +20,7 @@ from .skills import SkillMatcher
 from .adapters import ADAPTERS  # the registry object itself, not a copy
 from .adapters.base import AdapterError, normalise
 from .db import source_dict
-from .labels.engine import RuleEngine, now_iso, score
+from .labels.engine import Label, RuleEngine, now_iso, score
 
 
 def start_run(conn, trigger: str, seeding: bool) -> int:
@@ -285,13 +285,27 @@ def record_sighting(conn, run_id, source, posting_id, item):
 def label_posting(conn, engine: RuleEngine, posting_id: int, text: str,
                   title: str | None = None, profile=None,
                   location: str | None = None, matcher=None,
-                  employer: str | None = None) -> list:
+                  employer: str | None = None, kept: list = ()) -> list:
     """Regex rules plus the profile's structured labels.
 
     Two independent labellers over the same posting, each carrying its own
     `produced_by`. Neither overrules the other: they accumulate as evidence.
+
+    `kept` are rule labels relabel carries over from a body it no longer has (rule B
+    in `relabel`, whose `engine` then judges only the `field: title` rules). They
+    join before `track_label` and `blocked_by`, so a cluster or a gate found only in
+    that body still counts; a rule the text here reproduced is not carried twice.
+    Order follows `engine.rules`, as at first sight, because `blocked_by` is written
+    in label order.
     """
     labels = engine.apply(text, title=title)
+    if kept:
+        found = {l.rule_id for l in labels}
+        order: dict = {}
+        for position, rule in enumerate(engine.rules):
+            order.setdefault(rule.get("id"), position)
+        labels = sorted(labels + [l for l in kept if l.rule_id not in found],
+                        key=lambda l: order.get(l.rule_id, len(order)))
     if profile is not None and profile.configured:
         labels = labels + profile.labels_for(title, location)
         track = profile.track_label(labels)
@@ -458,8 +472,19 @@ def execute_in(conn, config, run_id: int, reporter=None,
                 continue
             record_sighting(conn, run_id, source, posting_id, item)
             if is_new:
+                # The one text this posting is judged on: what the engine and the
+                # skill line read below, and what is stored for every later relabel.
+                # Without a text from the adapter the title is read as the body, and
+                # stored as such, so a relabel reads what first sight read.
+                text, origin = ((item.text, "first-sight") if item.text
+                                else (item.title, "title-fallback"))
+                # Whole: a stored text shorter than the one read would be judged
+                # differently. REPLACE only matters if a posting id is ever reused.
+                conn.execute(
+                    "INSERT OR REPLACE INTO posting_text (posting_id, text, origin, "
+                    "stored_at) VALUES (?,?,?,?)", (posting_id, text, origin, now_iso()))
                 labels = label_posting(conn, engine, posting_id,
-                                       item.text or item.title, title=item.title,
+                                       text, title=item.title,
                                        profile=profile, location=item.location,
                                        matcher=matcher,
                                        employer=source["employer_name"])
@@ -479,8 +504,7 @@ def execute_in(conn, config, run_id: int, reporter=None,
                     "labels": [l.__dict__ for l in labels],
                     "score": score(labels, (config.settings.get("ranking") or {}).get("weights")),
                     "platform": source["platform"],
-                    "skills": _skill_line(matcher, item.text or item.title,
-                                          source["employer_name"]),
+                    "skills": _skill_line(matcher, text, source["employer_name"]),
                     "workable": not blocking,
                     "blocked_by": [l.explain for l in blocking],
                 })
@@ -564,32 +588,75 @@ def relabel(conn, config) -> dict:
     command rather than a note in the documentation.
 
     Triage decisions are never touched.
+
+    A posting with a row in `posting_text` is judged again, whole, on the text first
+    sight read. One without - collected before that table existed, and not rebuilt
+    by `vedetta backfill-text` - has no body anywhere, and what cannot be recomputed
+    is not deleted (rule B):
+
+    1. its `rules` labels are read before anything is deleted; `profile` labels are
+       never kept, they come from the title and location, which are there;
+    2. the profile and the `field: title` rules are judged on the title. A rule that
+       reads the body (no `field`, or anything but `title`) is not judged at all:
+       its stored verdict stands, absence included. On the title alone an `unless`
+       loses the body it was written for, so the rule would add a gate the body had
+       lifted - and the live `language-gate` is in `exclude_if`, so that hides the
+       posting. The price: a body rule added or changed since does not reach these
+       postings, in either direction. "Stored" is not always first sight: a relabel
+       from before P4 may have judged them on the title alone, and what it wrote
+       stays;
+    3. a label from point 1 is kept while its rule still exists and reads the body -
+       worded as the rule is now, with only `value` from the old row;
+    4. `no-target-track`, `blocked_by` and `workable` are decided on 2 and 3 together,
+       or a cluster found only in the body would hand the posting `no-target-track`;
+    5. its skills are left as they are: no matcher, so nothing deleted or added;
+    6. it is counted, as `without_text`, so the reader is told how many.
     """
     engine = RuleEngine(config.rules)
     profile = config.profile
     matcher = SkillMatcher(config.profile_doc)
+    # The rules a kept label may come from. `field` defaults to `all`, and a field the
+    # engine does not know reads `all` too (engine.py:102): only `title` is not body.
+    body_rules: dict[str, dict] = {}
+    for rule in engine.rules:
+        if rule.get("id") and rule.get("field", "all") != "title":
+            body_rules.setdefault(rule["id"], rule)
+    # Point 2: the same rules in the same order, the body ones reduced to their id. A
+    # rule with no `when` and no `extract` never fires (engine.py:109-113), and the
+    # id keeps its place: label_posting sorts `kept` into rules.yaml order, and
+    # `blocked_by` is written in label order.
+    title_engine = RuleEngine({**config.rules, "rules": [
+        rule if rule.get("field") == "title" else {"id": rule.get("id")}
+        for rule in engine.rules]})
+    # Ids first and texts one at a time: this loop writes to `posting`, which an open
+    # SELECT over it should not be reading at the same time.
     rows = conn.execute(
-        """SELECT p.id, p.title, p.location, p.raw, e.display_name AS employer
+        """SELECT p.id, p.title, p.location, e.display_name AS employer
            FROM posting p JOIN employer e ON e.id = p.employer_id
            ORDER BY p.id""").fetchall()
 
-    stats = {"postings": 0, "workable": 0, "excluded": 0}
+    stats = {"postings": 0, "workable": 0, "excluded": 0, "without_text": 0}
     for row in rows:
-        text = row["title"] or ""
-        if row["raw"]:
-            try:
-                payload = json.loads(row["raw"])
-                content = payload.get("content") or payload.get("description") or ""
-                if content:
-                    from .adapters.greenhouse import _unescape
-                    parts = [row["title"], row["location"], _unescape(content)]
-                    text = "\n".join(p for p in parts if p)
-            except Exception:
-                pass
-        conn.execute("DELETE FROM label WHERE posting_id=?", (row["id"],))
-        labels = label_posting(conn, engine, row["id"], text, title=row["title"],
-                               profile=profile, location=row["location"],
-                               matcher=matcher, employer=row["employer"])
+        stored = conn.execute("SELECT text FROM posting_text WHERE posting_id=?",
+                              (row["id"],)).fetchone()
+        if stored is not None:
+            conn.execute("DELETE FROM label WHERE posting_id=?", (row["id"],))
+            labels = label_posting(conn, engine, row["id"], stored[0],
+                                   title=row["title"], profile=profile,
+                                   location=row["location"], matcher=matcher,
+                                   employer=row["employer"])
+        else:
+            old = conn.execute(                                          # 1
+                "SELECT rule_id, value FROM label "
+                "WHERE posting_id=? AND produced_by='rules'", (row["id"],)).fetchall()
+            kept = [_kept_label(body_rules[r["rule_id"]], r["value"])   # 3
+                    for r in old if r["rule_id"] in body_rules]
+            conn.execute("DELETE FROM label WHERE posting_id=?", (row["id"],))
+            labels = label_posting(conn, title_engine, row["id"], row["title"],  # 2, 4
+                                   title=row["title"], profile=profile,
+                                   location=row["location"], matcher=None,  # 5
+                                   employer=row["employer"], kept=kept)
+            stats["without_text"] += 1                                    # 6
         stats["postings"] += 1
         if profile.configured and profile.blocked_by(labels):
             stats["excluded"] += 1
@@ -598,3 +665,17 @@ def relabel(conn, config) -> dict:
     conn.commit()
     stats["places"] = placetree_mod.rebuild(conn)
     return stats
+
+
+def _kept_label(rule: dict, value: str | None) -> Label:
+    """A label carried over from a body that is gone, worded as its rule is now.
+
+    The defaults are RuleEngine's (engine.py:121-123 for `when`, :164-166 for
+    `extract`): a kept label must read exactly as the engine would have written it.
+    """
+    numeric = bool(rule.get("extract"))
+    return Label(rule_id=rule["id"],
+                 kind=rule.get("kind", "gate" if numeric else "note"),
+                 severity=rule.get("severity", "warning" if numeric else "info"),
+                 explain=rule.get("explain", rule["id"]),
+                 value=value, weight=rule.get("weight"))

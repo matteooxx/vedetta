@@ -30,15 +30,23 @@ How this file is built, and why:
 from __future__ import annotations
 
 import copy
+import sqlite3
 
 import pytest
+import yaml
 
+from vedetta import backfill as backfill_mod
+from vedetta import cli as cli_mod
 from vedetta import db as db_mod
 from vedetta import run as run_mod
 from vedetta import triage as triage_mod
 from vedetta.adapters.base import RawPosting
 from vedetta.adapters.greenhouse import GreenhouseAdapter
 from vedetta.config import Config
+from vedetta.runlock import acquire
+# At import, before any fake adapter is registered: configstore reads ADAPTERS when it
+# is first imported, and would otherwise keep the fakes' parameters for the session.
+from vedetta.web import app as app_module
 
 # The name of the count P4 adds to what `relabel` returns: postings judged without a
 # stored text, whose body labels were kept rather than recomputed. The CLI and the
@@ -169,13 +177,13 @@ def _gh_job(job_id: int, title: str, content_text: str = BODY,
 
 
 # The other three adapters, in the shape each one stores: body in `text`, not in `raw`.
-def _workday_item(title: str = TITLE) -> RawPosting:
+def _workday_item(title: str = TITLE, body: str = BODY) -> RawPosting:
     path = "/job/Dublin/" + title.replace(" ", "-") + "_R101"
     return RawPosting(
         platform_key=path, title=title, location=LOCATION,
         url="https://acme.wd3.myworkdayjobs.com/en-US/Careers" + path,
         published_at="2026-11-01",
-        text=" \n".join([title, LOCATION, BODY]),                     # workday.py:92
+        text=" \n".join([title, LOCATION, body]),                     # workday.py:92
         raw={"title": title, "externalPath": path,                    # workday.py:93
              "locationsText": LOCATION, "postedOn": "Posted Today",
              "bulletFields": ["R101"]})
@@ -375,7 +383,40 @@ def test_relabel_brings_a_changed_profile_to_open_and_closed_postings(
         assert "the title asks for a level above yours (senior)" in state["blocked_by"]
 
 
-# --- known defects: xfail(strict=True) ------------------------------------------------
+def test_a_changed_profile_reaches_a_posting_without_stored_text(
+        conn, tmp_path, monkeypatch):
+    """The addition (g) waited for P4: the same change, on a posting with no stored
+    text. The profile's verdict comes from the title, which is there, so the old
+    `level-suitable` does not survive; what the body said is kept."""
+    title = "Senior Platform Engineer"
+    _watch(conn, "workday")
+    _serve(monkeypatch, "workday", [_workday_item(title)])
+    _run(conn, _config(tmp_path))
+    pid = _id(conn, title)
+    _forget_text(conn, pid)
+    before = _state(conn, pid)
+    body = {("needs-clearance", "rules"), ("platform-track", "rules"),
+            ("mentions-dublin", "rules")}
+    _precondition(("level-suitable", "profile") in before["labels"]
+                  and body <= set(before["labels"]), "level and body labels were set")
+
+    changed = copy.deepcopy(PROFILE)
+    changed["experience"] = {"accept_level": ["graduate"], "reject_level": ["senior"]}
+    stats = run_mod.relabel(conn, _config(tmp_path, changed))
+
+    after = _state(conn, pid)
+    assert stats[TEXTLESS_STAT] == 1
+    assert ("level-suitable", "profile") not in after["labels"]
+    assert ("level-too-senior", "profile") in after["labels"]
+    assert body <= set(after["labels"])
+    assert after["skills"] == before["skills"]
+    assert after["workable"] == 0
+    assert set(after["blocked_by"].split("; ")) == {
+        "requires a security clearance",
+        "the title asks for a level above yours (senior)"}
+
+
+# --- the defects P4 repaired (xfail(strict=True) until then) --------------------------
 
 LOSSY_FORMS = {
     "workday": lambda: ("workday", [_workday_item()]),
@@ -411,12 +452,6 @@ def _collect(conn, tmp_path, monkeypatch, form: str, cfg=None,
     return pid
 
 
-@pytest.mark.xfail(
-    strict=True, raises=AssertionError,
-    reason="V4/V5: relabel rebuilds the body only from raw['content'|'description'] "
-           "(run.py:545) after deleting every label (run.py:552); these shapes keep what "
-           "first sight read only in `text`, which is never stored, or in a raw cut "
-           "mid-JSON (run.py:260, :550). P4 (posting_text) removes this.")
 @pytest.mark.parametrize("form", list(LOSSY_FORMS))
 def test_relabel_at_unchanged_configuration_changes_nothing(
         conn, tmp_path, monkeypatch, form):
@@ -431,11 +466,6 @@ def test_relabel_at_unchanged_configuration_changes_nothing(
     assert _state(conn, pid) == before
 
 
-@pytest.mark.xfail(
-    strict=True, raises=AssertionError,
-    reason="Rule B: relabel deletes the labels (run.py:552) and label_posting deletes "
-           "posting_skill (run.py:317) before judging the title alone; nothing is "
-           "counted. P4 keeps body labels, passes matcher=None, and counts them.")
 @pytest.mark.parametrize("form", ["workday", "greenhouse-truncated-raw"])
 def test_a_posting_without_recoverable_text_keeps_what_its_body_said(
         conn, tmp_path, monkeypatch, form):
@@ -464,11 +494,6 @@ def test_a_posting_without_recoverable_text_keeps_what_its_body_said(
     assert stats["postings"] == 2 == stats["workable"] + stats["excluded"]
 
 
-@pytest.mark.xfail(
-    strict=True, raises=AssertionError,
-    reason="V19: the body cluster is lost on relabel, so track_label adds "
-           "no-target-track and the posting leaves the default view. P4 merges kept "
-           "labels before track_label and blocked_by.")
 def test_a_cluster_found_in_the_body_keeps_the_posting_workable(
         conn, tmp_path, monkeypatch):
     """(c) With `require_match` on, a posting whose only cluster came from the body
@@ -493,10 +518,6 @@ def test_a_cluster_found_in_the_body_keeps_the_posting_workable(
     assert ("platform-track", "rules") in after["labels"]
 
 
-@pytest.mark.xfail(
-    strict=True, raises=AssertionError,
-    reason="The body gate is lost on relabel (run.py:552), so the posting turns "
-           "workable with no blocked_by. P4 keeps the gate label for text-less postings.")
 def test_a_gate_found_in_the_body_keeps_the_posting_excluded(
         conn, tmp_path, monkeypatch):
     """(d) Excluded by a `field: body` gate listed in `exclude_if`: still excluded,
@@ -511,3 +532,291 @@ def test_a_gate_found_in_the_body_keeps_the_posting_excluded(
     run_mod.relabel(conn, _config(tmp_path))
     after = _state(conn, pid)
     assert (after["workable"], after["blocked_by"]) == (0, before["blocked_by"])
+
+
+# --- P4: what is kept follows the rules as they are written now ------------------------
+
+def test_a_kept_label_follows_the_rule_as_it_is_written_now(
+        conn, tmp_path, monkeypatch):
+    """Rule B, point 3. Without a text, a body label is kept only while its rule
+    exists and still reads the body: a deleted rule takes its label with it, a rule
+    moved to `field: title` is recomputed on the title, and a kept label carries the
+    rule's current wording, so `blocked_by` says what rules.yaml says today."""
+    pid = _collect(conn, tmp_path, monkeypatch, "workday")
+    _forget_text(conn, pid)
+    _precondition({"needs-clearance", "platform-track", "mentions-dublin"}
+                  <= _rule_ids(conn, pid), "the body produced labels")
+
+    cfg = _config(tmp_path)
+    rules = {r["id"]: r for r in cfg.rules["rules"]}
+    rules["needs-clearance"]["explain"] = "asks for a clearance you do not hold"
+    rules["needs-clearance"]["severity"] = "warning"
+    rules["mentions-dublin"]["field"] = "title"    # the title has no Dublin in it
+    cfg.rules["rules"] = [r for r in cfg.rules["rules"] if r["id"] != "platform-track"]
+    run_mod.relabel(conn, cfg)
+
+    ids = _rule_ids(conn, pid)
+    assert "platform-track" not in ids
+    assert "mentions-dublin" not in ids
+    kept = conn.execute("SELECT kind, severity, explain FROM label WHERE posting_id=? "
+                        "AND rule_id='needs-clearance'", (pid,)).fetchone()
+    assert tuple(kept) == ("gate", "warning", "asks for a clearance you do not hold")
+    row = conn.execute("SELECT workable, blocked_by FROM posting WHERE id=?",
+                       (pid,)).fetchone()
+    assert tuple(row) == (0, "asks for a clearance you do not hold")
+
+
+def test_a_profile_label_is_never_kept_even_when_a_rule_shares_its_id(
+        conn, tmp_path, monkeypatch):
+    """Rule B, point 1: only `rules` labels are read to be kept. Profile labels come
+    from the title and location, which are there. Rule and profile labels share one
+    namespace of ids, so a rule named like a profile label must not turn the old
+    profile verdict into a rule label the body never gave."""
+    pid = _collect(conn, tmp_path, monkeypatch, "workday")
+    _forget_text(conn, pid)
+    _precondition(("location-preferred", "profile") in _state(conn, pid)["labels"],
+                  "the profile placed it")
+
+    cfg = _config(tmp_path)
+    cfg.rules["rules"].append({"id": "location-preferred", "kind": "note",
+                               "severity": "info", "when": r"(?i)\bnever-in-any-text\b"})
+    run_mod.relabel(conn, cfg)
+    assert ("location-preferred", "rules") not in _state(conn, pid)["labels"]
+
+
+# --- P4b: without a text, only `field: title` rules are judged again --------------------
+
+@pytest.mark.parametrize("field", [None, "body"])
+def test_an_unless_the_body_satisfied_does_not_come_back_without_a_text(
+        conn, tmp_path, monkeypatch, field):
+    """The live `language-gate`: no `field`, an `unless`, and listed in `exclude_if`.
+    The title asks for German, the body says German is a plus, so first sight gives
+    no label. Judged again on the title alone, the `when` still hits and the `unless`
+    has nothing to read: the gate would be added, and the posting hidden by a body
+    that said the opposite. Without a text, a rule that reads the body keeps its
+    verdict from first sight - here, its absence."""
+    gate = {"id": "language-gate", "kind": "gate", "severity": "blocking",
+            "when": r"(?i)fluent in german", "unless": r"(?i)german[^.]{0,40}a plus",
+            "explain": "asks for a language you do not speak"}
+    if field:
+        gate["field"] = field
+    profile = copy.deepcopy(PROFILE)
+    profile["exclude_if"] = profile["exclude_if"] + ["language-gate"]
+    cfg = _config(tmp_path, profile)
+    cfg.rules["rules"].append(gate)
+    title = "Project Manager (Fluent in German)"
+    _watch(conn, "workday")
+    _serve(monkeypatch, "workday", [_workday_item(
+        title, "Business German is a plus. You will run our delivery reviews.")])
+    _run(conn, cfg)
+    pid = _id(conn, title)
+    _forget_text(conn, pid)
+    before = _state(conn, pid)
+    _precondition("language-gate" not in _rule_ids(conn, pid) and before["workable"] == 1,
+                  "the body's unless suppressed the gate at first sight")
+    _precondition("language-gate" in {l.rule_id for l in run_mod.RuleEngine(
+        cfg.rules).apply(title, title=title)},
+                  "on the title alone the gate fires, so this case can catch the defect")
+
+    stats = run_mod.relabel(conn, cfg)
+    assert stats[TEXTLESS_STAT] == 1
+    assert _state(conn, pid) == before
+
+
+def test_a_new_rule_on_the_body_reaches_only_the_postings_with_a_text(
+        conn, tmp_path, monkeypatch):
+    """The price of the test above, photographed so that it reads as a decision. A
+    rule added after first sight is judged on every posting with a stored text; on one
+    without, only if it is `field: title`. A rule that reads the body is not judged on
+    less evidence than first sight had."""
+    textless = _collect(conn, tmp_path, monkeypatch, "workday",
+                        greenhouse_too=(_gh_job(2, "Site Reliability Engineer"),))
+    _forget_text(conn, textless)
+    with_text = _id(conn, "Site Reliability Engineer")
+    cfg = _config(tmp_path)
+    cfg.rules["rules"] += [
+        {"id": "new-on-all", "when": r"(?i)engineer"},
+        {"id": "new-on-body", "field": "body", "when": r"(?i)engineer"},
+        {"id": "new-on-title", "field": "title", "when": r"(?i)engineer"}]
+    _precondition("engineer" in TITLE.lower(), "every new rule hits the title")
+
+    run_mod.relabel(conn, cfg)
+    new = {"new-on-all", "new-on-body", "new-on-title"}
+    assert _rule_ids(conn, with_text) & new == new
+    assert _rule_ids(conn, textless) & new == {"new-on-title"}
+
+
+def test_a_kept_gate_keeps_its_place_in_blocked_by(conn, tmp_path, monkeypatch):
+    """`blocked_by` is written in label order, which is rules.yaml order. A body gate
+    kept from first sight must still come before a title gate listed after it, or a
+    relabel at unchanged configuration rewrites the reason line of every such posting."""
+    profile = copy.deepcopy(PROFILE)
+    profile["exclude_if"] = profile["exclude_if"] + ["title-gate"]
+    cfg = _config(tmp_path, profile)
+    cfg.rules["rules"].append({"id": "title-gate", "kind": "gate", "field": "title",
+                               "when": r"(?i)engineer", "explain": "an engineering title"})
+    pid = _collect(conn, tmp_path, monkeypatch, "workday", cfg)
+    _forget_text(conn, pid)
+    before = _state(conn, pid)
+    _precondition(before["blocked_by"]
+                  == "requires a security clearance; an engineering title",
+                  "the body gate and the title gate both excluded it, in rule order")
+
+    run_mod.relabel(conn, cfg)
+    assert _state(conn, pid) == before
+
+
+def test_first_sight_stores_exactly_the_text_the_engine_read(
+        conn, tmp_path, monkeypatch):
+    """Decision A: one variable is read by the engine and written to posting_text. An
+    adapter that leaves `text` empty is judged on its title, so the title is what is
+    stored, and `origin` says it was a fallback."""
+    _watch(conn, "stub")
+    _serve(monkeypatch, "stub", [RawPosting(
+        platform_key="e-1", title="Untexted Role", location=LOCATION,
+        url="https://x.invalid/e-1", text="", raw={"id": "e-1"})])
+    _watch(conn, "greenhouse")
+    _serve_greenhouse(monkeypatch, [_gh_job(1, TITLE)])
+    _run(conn, _config(tmp_path))
+
+    rows = {r["title"]: (r["text"], r["origin"]) for r in conn.execute(
+        "SELECT p.title, t.text, t.origin FROM posting p "
+        "JOIN posting_text t ON t.posting_id = p.id")}
+    assert rows["Untexted Role"] == ("Untexted Role", "title-fallback")
+    assert rows[TITLE] == (f"{TITLE} \n{LOCATION} \n{BODY}", "first-sight")
+
+
+# --- P4: backfill-text ------------------------------------------------------------------
+
+def _texts(conn) -> dict:
+    return {r[0]: (r[1], r[2]) for r in conn.execute(
+        "SELECT posting_id, text, origin FROM posting_text")}
+
+
+def test_backfill_rebuilds_what_greenhouse_first_sight_stored_and_counts_the_rest(
+        conn, tmp_path, monkeypatch):
+    """The Greenhouse formula (greenhouse.py:72), empty content included, gives back
+    the text first sight stored. Every other platform has no body in `raw` and is left
+    to rule B; a `raw` cut mid-JSON is counted apart. The three add up to what was read."""
+    _watch(conn, "workday")
+    _serve(monkeypatch, "workday", [_workday_item("Workday Engineer")])
+    _watch(conn, "greenhouse")
+    _serve_greenhouse(monkeypatch, [
+        _gh_job(1, TITLE), _gh_job(2, "Data Engineer", ""),
+        _gh_job(3, "Site Reliability Engineer", BODY + PADDING)])
+    _run(conn, _config(tmp_path))
+    ids = {t: _id(conn, t) for t in (TITLE, "Data Engineer", "Site Reliability Engineer",
+                                     "Workday Engineer")}
+    first_sight = _texts(conn)
+    for pid in ids.values():
+        _forget_text(conn, pid)
+
+    report = backfill_mod.backfill(conn, apply=False)
+    assert _texts(conn) == {}, "nothing is written without apply"
+    assert report.read == 4
+    assert report.read == report.with_text + report.without_text + report.unreadable
+    assert (report.with_text, report.without_text, report.unreadable) == (2, 1, 1)
+    assert report.by_platform["workday"]["without_text"] == 1
+    assert report.by_platform["greenhouse"]["unreadable"] == 1
+
+    report = backfill_mod.backfill(conn, apply=True)
+    assert report.with_text == 2
+    stored = _texts(conn)
+    for title in (TITLE, "Data Engineer"):
+        assert stored[ids[title]] == (first_sight[ids[title]][0], "backfill-greenhouse")
+    assert ids["Workday Engineer"] not in stored
+    assert ids["Site Reliability Engineer"] not in stored
+
+    # Nothing left to rebuild, and what was stored is not rewritten.
+    again = backfill_mod.backfill(conn, apply=True)
+    assert (again.read, again.with_text) == (2, 0)
+    assert _texts(conn) == stored
+
+
+# --- P4: the command line, and the run lock ---------------------------------------------
+
+@pytest.fixture()
+def stored(tmp_path, monkeypatch):
+    """A root and a config directory the CLI can be pointed at, with a Greenhouse
+    posting whose text was forgotten and a Workday one, both collected by execute_in."""
+    root, cfgdir = tmp_path / "root", tmp_path / "cfg"
+    cfgdir.mkdir()
+    (cfgdir / "rules.yaml").write_text(yaml.safe_dump(RULES), encoding="utf-8")
+    (cfgdir / "profile.yaml").write_text(yaml.safe_dump(PROFILE), encoding="utf-8")
+    cfg = Config(root=root, settings={}, rules=copy.deepcopy(RULES),
+                 profile_doc=copy.deepcopy(PROFILE))
+    connection = db_mod.connect(cfg.db_path)
+    connection.execute(
+        "INSERT INTO employer (id, key, display_name) VALUES (1, 'acme', 'Acme')")
+    _watch(connection, "workday")
+    _serve(monkeypatch, "workday", [_workday_item("Workday Engineer")])
+    _watch(connection, "greenhouse")
+    _serve_greenhouse(monkeypatch, [_gh_job(1, TITLE)])
+    _run(connection, cfg)
+    for title in (TITLE, "Workday Engineer"):
+        _forget_text(connection, _id(connection, title))
+    connection.close()
+    return {"root": root, "cfg": cfgdir, "db": cfg.db_path,
+            "argv": ["--root", str(root), "--config-dir", str(cfgdir)]}
+
+
+def _dump(path) -> list[str]:
+    connection = sqlite3.connect(str(path))
+    try:
+        return list(connection.iterdump())
+    finally:
+        connection.close()
+
+
+def test_backfill_text_without_apply_writes_nothing(stored, capsys):
+    before = _dump(stored["db"])
+    assert cli_mod.main(stored["argv"] + ["backfill-text"]) == 0
+    assert _dump(stored["db"]) == before
+    out = capsys.readouterr().out
+    assert "read 2 posting(s) with no stored text" in out
+    assert "Nothing written" in out
+
+
+def test_backfill_text_apply_stores_the_text(stored, capsys):
+    assert cli_mod.main(stored["argv"] + ["backfill-text", "--apply"]) == 0
+    connection = sqlite3.connect(str(stored["db"]))
+    origins = [r[0] for r in connection.execute("SELECT origin FROM posting_text")]
+    connection.close()
+    assert origins == ["backfill-greenhouse"]
+
+
+@pytest.mark.parametrize("command", [["backfill-text", "--apply"], ["relabel"]])
+def test_a_bulk_write_waits_for_a_run_in_progress(stored, command, capsys):
+    """Decision I: with the run lock held, exit 3 and write nothing."""
+    before = _dump(stored["db"])
+    with acquire(stored["db"].parent / "run.lock", owner="test:run"):
+        assert cli_mod.main(stored["argv"] + command) == 3
+    assert _dump(stored["db"]) == before
+    assert "still in progress" in capsys.readouterr().err
+
+
+def test_relabel_says_how_many_had_no_stored_text(stored, capsys):
+    """Rule B, point 6, on the command line."""
+    assert cli_mod.main(stored["argv"] + ["relabel"]) == 0
+    out = capsys.readouterr().out
+    assert "re-evaluated 2 postings" in out
+    assert "2 without a stored text" in out
+    # P4b: an edit to a body rule has no effect on these, and the reader is told so.
+    assert "rules that read the body NOT re-evaluated" in out
+
+
+def test_the_interface_says_how_many_had_no_stored_text(stored, monkeypatch):
+    """Rule B, point 6, in the message of the Re-apply Rules button."""
+    monkeypatch.setenv("VEDETTA_ROOT", str(stored["root"]))
+    monkeypatch.setenv("VEDETTA_CONFIG_DIR", str(stored["cfg"]))
+    import importlib
+    importlib.reload(app_module)   # app.py reads the two variables at import
+    application = app_module.create_app()
+    application.config.update(TESTING=True)
+    client = application.test_client()
+    client.post("/relabel")
+    with client.session_transaction() as session:
+        messages = [m for _, m in session.get("_flashes", [])]
+    assert any("2 without a stored text" in m for m in messages), messages
+    assert any("rules that read the body were not re-evaluated" in m
+               for m in messages), messages

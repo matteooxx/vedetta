@@ -491,7 +491,10 @@ def create_app() -> Flask:
             return redirect(request.referrer or url_for("dashboard"))
         conn.close()
         flash(f"Re-evaluated {stats['postings']} postings: {stats['workable']} workable, "
-              f"{stats['excluded']} excluded and still listed.", "ok")
+              f"{stats['excluded']} excluded and still listed. "
+              f"{stats['without_text']} without a stored text: on these only the "
+              f"profile and the title rules were re-evaluated; rules that read the "
+              f"body were not re-evaluated, so their stored verdicts stay.", "ok")
         return redirect(request.referrer or url_for("postings"))
 
     @app.post("/views")

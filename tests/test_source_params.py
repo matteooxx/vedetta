@@ -252,6 +252,21 @@ def test_a_source_without_params_stores_null(world):
     assert conn.execute("SELECT params FROM source").fetchone()[0] is None
 
 
+def test_removing_the_last_parameter_of_an_existing_source_clears_it(world):
+    """The removal in the test above always leaves another parameter beside the one
+    removed, so `params` is never None on that update. Here the last one goes: the
+    upsert writes NULL, and `language` stops reaching fetch. With
+    `params=COALESCE(excluded.params, params)` the old JSON would survive, and the
+    source would keep being read in French with nothing in the watchlist saying so."""
+    _, _, conn, _ = world
+    got = _sync_and_run(world, _source("sitemap", language="fr"))
+    _precondition(got.get("language") == "fr", "the parameter arrived on insert")
+    got = _sync_and_run(world, _source("sitemap"))
+    rows = conn.execute("SELECT params FROM source").fetchall()
+    assert len(rows) == 1 and rows[0][0] is None
+    assert got.get("language") is None
+
+
 def test_a_parameter_another_adapter_reads_is_refused():
     text = _watchlist(_source("greenhouse", language="fr"))
     try:

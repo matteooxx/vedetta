@@ -129,6 +129,19 @@ CREATE INDEX IF NOT EXISTS posting_recon
 CREATE INDEX IF NOT EXISTS posting_workable
   ON posting(workable, closed_run, id);
 
+-- The text the rule engine read when the posting was first seen, kept whole, so a
+-- relabel judges the same words again. Its own table and not a column of `posting`:
+-- a new table needs no entry in MIGRATIONS, and a missing row is the explicit sign
+-- "never stored", which relabel treats differently (run.relabel). A table, not
+-- `raw`, because `raw` is each platform's own shape and is cut at 200,000 characters.
+-- origin: first-sight | title-fallback | backfill-greenhouse.
+CREATE TABLE IF NOT EXISTS posting_text (
+  posting_id INTEGER PRIMARY KEY REFERENCES posting(id) ON DELETE CASCADE,
+  text       TEXT NOT NULL,
+  origin     TEXT NOT NULL,
+  stored_at  TEXT NOT NULL
+);
+
 -- One row per place mentioned by a posting. A free-text location column cannot be
 -- faceted, and a posting routinely names several places.
 CREATE TABLE IF NOT EXISTS posting_place (
