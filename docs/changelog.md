@@ -538,3 +538,21 @@ Append-only. One line per change, newest at the bottom.
   the bug as fixed in its own message. The fix is P1b, not yet done. Older entries are left
   as written, and the correction is in `docs/improvements-backlog.md` under A2. Five more
   findings of this phase, none fixed, are D1–D5 in the same file.
+- 2026-11-17 — **Four defects found while building Phase 2 released** (`5609799`,
+  `59ddd2f`, `f22fa01`, `9cf9475`). An unknown rule `field` is now refused where the
+  rules are compiled instead of falling back to `all`, so `field: department` says so
+  rather than firing on any mention in the text (`labels/engine.py`); the daily run
+  loads rules through `config.load` and never calls `validate`, which is why the
+  interface alone was not enough. A tie in the place tree no longer invents a parent
+  country, and four two-letter codes (`CA`, `IL`, `GA`, `NY`) are no longer read as
+  countries (`places.py`, `placetree.py`, `regions.py`). `discovered_by` and
+  `evidence` now reach the database from the watchlist (`config.py`). Measured on a
+  coherent copy of the real database before release: of 17511 postings, **5 leave the
+  default view** (one of them open, none with a triage decision) and **278 keep a more
+  precise reason** — `outside where you can work (India)` becomes
+  `(India, inferred from Bengaluru)`, and Colombia, Chile, Mexico, Panama and South
+  Korea appear where a wrong parent used to stand. 921 Canada drops to 649, 723 Germany
+  to 493, 2054 India to 1957; **666 postings had no place at all before and after**, so
+  nothing lost its location. `docs/adding-a-sector.md` item 4 described this defect as
+  present and now records it as fixed, struck through rather than deleted. 538 → 581
+  tests passing, 6 → 5 xfail.

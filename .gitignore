@@ -21,7 +21,13 @@ vedetta.egg-info/
 # (APPLICA.md, punto 3 di ogni passo). Sono il ritorno indietro piu veloce e
 # devono restare sul disco, ma non sono una versione: nel repository sarebbero
 # venti copie dello stesso file.
-*.bak-P*
+#
+# Il modello era *.bak-P* - scritto per .bak-P1a, .bak-P2, .bak-P3, .bak-P4 - e il
+# 17/11 i backup del passo dei difetti sono stati chiamati .bak-DIF-20261117, che
+# non vi corrisponde: sono entrati in un commit, 5941 inserimenti invece di 530.
+# Allargato a *.bak-* perche la regola deve seguire l intento (i backup della
+# procedura) e non la convenzione di nome del giorno.
+*.bak-*
 
 # Lo schema del database di PRODUZIONE. Non contiene dati - 213 righe, zero
 # INSERT, generato leggendo sqlite_master di una copia coerente - ma e la forma

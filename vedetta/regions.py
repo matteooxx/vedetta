@@ -350,9 +350,10 @@ _add("Morocco", "Casablanca", "Rabat")
 #
 # Georgia is left out: it is a US state and a country, and the country is the one a
 # European job search is more likely to mean. Two-letter codes that collide with a
-# country code the place extractor already knows are left out too - CA is Canada
-# before California, IL is Israel before Illinois, IN is India before Indiana, DE is
-# Germany before Delaware, and getting that wrong would exclude the wrong continent.
+# country code are left out too - CA is California or Canada, IL Illinois or Israel,
+# IN Indiana or India, DE Delaware or Germany - and a wrong guess would exclude the
+# wrong continent. The place extractor reads none of them as a country either, except
+# glued to a city ("CA-Toronto"): see COUNTRY_ONLY_WHEN_GLUED in places.py.
 _add("United States",
      "Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado",
      "Connecticut", "Delaware", "Florida", "Hawaii", "Idaho", "Illinois", "Indiana",

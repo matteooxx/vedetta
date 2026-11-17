@@ -12,6 +12,11 @@ asking for when they click Germany is 24.
 """
 from __future__ import annotations
 
+import json
+import os
+import subprocess
+import sys
+
 import pytest
 
 from vedetta import db as db_mod
@@ -45,6 +50,16 @@ def test_one_posting_is_not_evidence_about_a_place():
     assert placetree.derive(rows)["Oeiras"]["parent"] is None
 
 
+def test_a_state_code_does_not_vote_for_a_country():
+    """"United States - San Mateo, CA" read CA as Canada, so every San Mateo
+    posting voted for two countries, the tie left it with no parent, and it sat at
+    the top of the filter. Without the invented vote it is in the United States."""
+    from vedetta.places import extract
+    places = extract("United States - San Mateo, CA")[0]
+    rows = [(pid, place) for pid in (1, 2) for place in places]
+    assert placetree.derive(rows)["San Mateo"]["parent"] == "United States"
+
+
 def test_a_minority_of_sightings_is_not_enough():
     rows = [(1, "Springfield"), (1, "Ireland"), (2, "Springfield"), (3, "Springfield"),
             (4, "Springfield"), (5, "Springfield")]
@@ -55,6 +70,78 @@ def test_a_majority_is():
     rows = [(1, "Springfield"), (1, "Ireland"), (2, "Springfield"), (2, "Ireland"),
             (3, "Springfield")]
     assert placetree.derive(rows)["Springfield"]["parent"] == "Ireland"
+
+
+# --- a tie between two countries -------------------------------------------
+
+def test_a_tie_is_not_a_majority_for_either_country():
+    """Both postings name Ireland and Germany, so each country has every vote and
+    each passes the majority test. Nothing in the data prefers one, and the parent
+    used to be whichever the process happened to iterate first."""
+    rows = [(1, "Springfield"), (1, "Ireland"), (1, "Germany"),
+            (2, "Springfield"), (2, "Ireland"), (2, "Germany")]
+    assert placetree.derive(rows)["Springfield"]["parent"] is None
+
+
+def test_half_and_half_is_a_tie_too():
+    rows = [(1, "Springfield"), (1, "Ireland"), (2, "Springfield"), (2, "Germany"),
+            (3, "Springfield"), (3, "Ireland"), (4, "Springfield"), (4, "Germany")]
+    assert placetree.derive(rows)["Springfield"]["parent"] is None
+
+
+def test_one_vote_more_is_enough_to_decide():
+    """Only an exact tie is left without a parent: a lead of one still decides."""
+    rows = [(1, "Springfield"), (1, "Ireland"), (1, "Germany"),
+            (2, "Springfield"), (2, "Ireland"), (2, "Germany"),
+            (3, "Springfield"), (3, "Ireland")]
+    assert placetree.derive(rows)["Springfield"]["parent"] == "Ireland"
+
+
+def test_a_tie_in_the_votes_does_not_overrule_the_table():
+    """Krakow is in the table, so the postings are not asked."""
+    rows = [(1, "Krakow"), (1, "Poland"), (1, "Germany"),
+            (2, "Krakow"), (2, "Poland"), (2, "Germany")]
+    assert placetree.derive(rows)["Krakow"]["parent"] == "Poland"
+
+
+# Each place is tied between its own pair of countries, so a seed-dependent order
+# would have to agree across every pair and every seed to go unnoticed.
+_TIED_PAIRS = [
+    ("Ireland", "Germany"), ("France", "Spain"), ("Italy", "Portugal"),
+    ("Poland", "Sweden"), ("Belgium", "Netherlands"), ("Denmark", "Norway"),
+    ("Mexico", "Colombia"), ("Chile", "Argentina"), ("Canada", "United States"),
+    ("Australia", "Singapore"), ("Israel", "India"), ("Switzerland", "Austria"),
+]
+
+_DERIVE_IN_A_CHILD = """
+import json, sys
+from vedetta import placetree
+rows = [tuple(r) for r in json.load(sys.stdin)]
+print(json.dumps(placetree.derive(rows), sort_keys=True))
+"""
+
+
+def _derive_with_hash_seed(rows, seed: str) -> dict:
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    env = dict(os.environ, PYTHONHASHSEED=seed,
+               PYTHONPATH=os.pathsep.join(
+                   [root] + [p for p in [os.environ.get("PYTHONPATH")] if p]))
+    done = subprocess.run([sys.executable, "-c", _DERIVE_IN_A_CHILD],
+                          input=json.dumps(rows), capture_output=True, text=True,
+                          env=env, cwd=root, timeout=60, check=True)
+    return json.loads(done.stdout)
+
+
+def test_the_same_postings_give_the_same_tree_in_every_process():
+    """The hash seed is fixed when a process starts, so two calls in this one would
+    agree whatever the code did. Each seed gets a process of its own."""
+    rows = []
+    for n, (first, second) in enumerate(_TIED_PAIRS):
+        place = f"Springfield {n}"
+        for posting in (2 * n + 1, 2 * n + 2):
+            rows += [(posting, place), (posting, first), (posting, second)]
+    trees = {seed: _derive_with_hash_seed(rows, seed) for seed in ("1", "2", "3")}
+    assert trees["1"] == trees["2"] == trees["3"]
 
 
 def test_two_spellings_of_one_place_share_a_row():
@@ -215,3 +302,16 @@ def test_the_counts_in_the_panel_are_the_counts_you_get(board):
         assert _matching(board, place=[top["value"]]) == top["n"], top["value"]
         for child in top["children"]:
             assert _matching(board, place=[child["value"]]) == child["n"], child["value"]
+
+
+def test_a_place_left_without_a_parent_stays_on_the_panel(conn):
+    """A tie leaves the place without a country, not without a row: it sits at the
+    top level under its own name, so the posting that names nothing else is still
+    counted, shown and found."""
+    _posting(conn, 1, "Backend Engineer", ["Springfield", "Ireland", "Germany"])
+    _posting(conn, 2, "Platform Engineer", ["Springfield", "Ireland", "Germany"])
+    _posting(conn, 3, "Data Engineer", ["Springfield"])
+    placetree.rebuild(conn)
+    springfield = _row(_tree(conn), "Springfield")
+    assert springfield["n"] == 3
+    assert _matching(conn, place=["Springfield"]) == 3

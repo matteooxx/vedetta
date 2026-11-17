@@ -20,7 +20,9 @@ Two sources for a place's parent, in this order:
 Co-occurrence needs a majority, not a plurality. With a single vote it is wrong:
 "Oeiras" landed under Poland and "Ciudad Mexico" under Germany, each from one
 posting that happened to list two places. A parent has to be named by at least half
-of that place's postings, and by at least two of them.
+of that place's postings, and by at least two of them, and by more of them than any
+other country: a tie leaves the place without a parent, at the top of the filter
+under its own name, rather than under a country chosen by nothing in the data.
 
 The result is a table, not a computation hidden inside a query. A reader can look at
 `place_meta` and see why Dublin sits under Ireland, and `vedetta check` can report it.
@@ -78,10 +80,16 @@ def derive(rows: list[tuple[int, str]]) -> dict[str, dict]:
             continue
         parent = regions_mod.infer_country(name)
         if parent is None and votes[name]:
-            country, count = votes[name].most_common(1)[0]
+            (country, count), *others = votes[name].most_common()
+            runner_up = others[0][1] if others else 0
             # A majority, not a plurality. One posting listing two places is not
             # evidence about either of them.
-            if count >= MIN_VOTES and count * 2 >= seen[name]:
+            #
+            # And a tie is not a majority for either country: no parent. Postings
+            # naming two countries at once give both every vote, and the winner was
+            # whichever the process happened to iterate first, so a place moved from
+            # one country to another between runs on the same data.
+            if count >= MIN_VOTES and count * 2 >= seen[name] and count > runner_up:
                 parent = country
         parent_of[name] = parent
 

@@ -197,11 +197,35 @@ def test_the_columns_sync_writes_reach_fetch_on_insert_and_update(world):
     }
     got = _sync_and_run(world, _source("sitemap", **second))
     assert {k: got[k] for k in second} == {
-        **second, "verified_on": "2026-11-02", "enabled": 1,
-        # A photograph, not an endorsement: the upsert writes discovered_by on insert
-        # and leaves it out of DO UPDATE (config.py:158-164), so an edit to it in the
-        # watchlist never reaches an existing row.
-        "discovered_by": "manifest"}
+        **second, "verified_on": "2026-11-02", "enabled": 1}
+
+
+def test_discovered_by_and_evidence_reach_the_database_on_insert_and_update(world):
+    """D2: the two fields the upsert used to lose, read back from the table itself.
+
+    Insert branch: the first sync creates the row and must store both. Update branch:
+    the second sync hits ON CONFLICT and must overwrite both. The whole path is the
+    real one (configstore.save -> config.load -> sync_watchlist); the assertion reads
+    the `source` row, not what fetch received.
+    """
+    root, config_dir, conn, _calls = world
+
+    def sync(**keys):
+        configstore.save(config_dir, "watchlist",
+                         _watchlist(_source("sitemap", **keys)), None)
+        config_mod.sync_watchlist(conn, config_mod.load(root, config_dir).watchlist)
+        rows = conn.execute("SELECT id, discovered_by, evidence FROM source").fetchall()
+        _precondition(len(rows) == 1, f"expected one source row, got {len(rows)}")
+        return tuple(rows[0])
+
+    row_id, discovered_by, evidence = sync(
+        discovered_by="manifest", evidence="found in the robots.txt sitemap line")
+    assert (discovered_by, evidence) == ("manifest", "found in the robots.txt sitemap line")
+
+    same_id, discovered_by, evidence = sync(
+        discovered_by="redirect", evidence="careers page redirects to the ATS")
+    assert same_id == row_id, "the second sync must update the row, not add one"
+    assert (discovered_by, evidence) == ("redirect", "careers page redirects to the ATS")
 
 
 # --- every declared parameter, insert, update, removal ------------------------------

@@ -6,6 +6,7 @@ So they get tests, and the tests encode the real distinctions rather than toy ca
 """
 from __future__ import annotations
 
+import pytest
 import yaml
 
 from vedetta.adapters.base import normalise
@@ -82,6 +83,64 @@ def test_seniority_within_profile_is_not_flagged():
 def test_highest_number_wins_when_several_are_present():
     labels = engine().apply("2 years required, 7 years preferred.")
     assert labels[0].value == "7"
+
+
+# --- what a rule reads: `field` --------------------------------------------
+#
+# An unknown `field` used to fall back to `all` in silence, so a rule written to read
+# the department fired on any mention in the advert. It is refused when the rules are
+# compiled, by name, before a single posting is judged.
+
+def _cash_rule(**extra):
+    return {"id": "cash-dept", "kind": "cluster", "severity": "positive",
+            "explain": "x", "when": [r"(?i)\bcash handling\b"], **extra}
+
+
+def test_an_unknown_field_is_refused_naming_the_rule_and_the_value():
+    with pytest.raises(ValueError) as refused:
+        RuleEngine({"rules": [_cash_rule(field="department")]})
+    message = str(refused.value)
+    assert message.startswith("rule 'cash-dept': field 'department' ")
+    assert "title, body, all" in message
+
+
+@pytest.mark.parametrize("value", [None, "Title", ["title"]],
+                         ids=["empty", "capitalised", "list"])
+def test_a_field_that_is_almost_a_scope_is_refused_too(value):
+    """`field:` left empty reads as None, and None fell back to `all` like the rest."""
+    with pytest.raises(ValueError, match="cash-dept"):
+        RuleEngine({"rules": [_cash_rule(field=value)]})
+
+
+def test_a_rule_without_an_id_is_named_by_its_position():
+    rule = _cash_rule(field="department")
+    del rule["id"]
+    with pytest.raises(ValueError, match=r"^rule 2: field 'department' "):
+        RuleEngine({"rules": [_cash_rule(), rule]})
+
+
+def test_a_field_changed_after_compiling_fails_instead_of_reading_everything():
+    """The second guard, in `apply`: no fallback to `all` there either."""
+    rule = _cash_rule(field="body")
+    compiled = RuleEngine({"rules": [rule]})
+    rule["field"] = "department"
+    with pytest.raises(KeyError):
+        compiled.apply("Duties include cash handling.", title="Store Manager")
+
+
+def test_the_three_scopes_still_read_what_they_say():
+    text = "Duties include cash handling."
+    for field, fires in (("title", False), ("body", True), ("all", True)):
+        labels = RuleEngine({"rules": [_cash_rule(field=field)]}).apply(
+            text, title="Store Manager")
+        assert bool(labels) is fires, field
+    assert RuleEngine({"rules": [_cash_rule()]}).apply(text, title="Store Manager")
+
+
+def test_compare_field_is_not_a_scope():
+    """The other `field`: inside `compare` it names a profile number, as in the live
+    years gate. Checking it against title/body/all would refuse production's rules."""
+    assert [l.value for l in engine().apply("At least 5+ years of experience.")] == ["5"]
 
 
 # --- scoring is arithmetic over visible facts ----------------------------

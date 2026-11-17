@@ -615,8 +615,9 @@ def relabel(conn, config) -> dict:
     engine = RuleEngine(config.rules)
     profile = config.profile
     matcher = SkillMatcher(config.profile_doc)
-    # The rules a kept label may come from. `field` defaults to `all`, and a field the
-    # engine does not know reads `all` too (engine.py:102): only `title` is not body.
+    # The rules a kept label may come from. `field` defaults to `all`, and the engine
+    # above has already refused any value but title, body or all: only `title` is
+    # not body.
     body_rules: dict[str, dict] = {}
     for rule in engine.rules:
         if rule.get("id") and rule.get("field", "all") != "title":

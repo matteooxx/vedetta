@@ -15,6 +15,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import re
 
 import pytest
 import yaml
@@ -232,10 +233,11 @@ def _rule_engine(field, pattern):
 
 @pytest.mark.xfail(strict=False, reason=(
     "Nessuna regola puo' leggere reparto o tipo di contratto. Una regola legge solo "
-    "title, body o all (labels/engine.py:94-102) e apply() riceve solo titolo e testo. "
+    "title, body o all (labels/engine.py, FIELDS) e apply() riceve solo titolo e testo. "
     "Nel posting reale 'Kitchen Porter' il reparto e' 'Catering' e il contratto "
     "'Bank', ma stanno in raw e non arrivano al motore: una regola `field: "
-    "department` non scatta mai. Nei settori non tech sono spesso il segnale migliore."))
+    "department` viene rifiutata quando le regole si compilano. Nei settori non "
+    "tech sono spesso il segnale migliore."))
 @pytest.mark.parametrize("field, pattern", [
     ("department", r"(?i)\bcatering\b"),
     ("employment_type", r"(?i)\bbank\b"),
@@ -246,16 +248,23 @@ def test_a_rule_can_read_department_or_contract_type(postings, field, pattern):
     assert "structured-signal" in ids(labels)
 
 
-@pytest.mark.xfail(strict=False, reason=(
-    "Un `field` sconosciuto non da' errore: ricade in silenzio su 'all' "
-    "(labels/engine.py:94-102, scopes.get(field, scopes['all'])). Una regola scritta "
-    "`field: department` quindi non e' inerte, legge titolo e descrizione insieme e "
-    "scatta su qualunque menzione nel testo: qui 'Store Manager' ha reparto 'Retail "
-    "Operations', ma la regola scatta per la parola nella descrizione. Meglio un "
-    "errore che un risultato sbagliato e plausibile."))
 def test_an_unknown_field_does_not_silently_read_everything(postings):
-    # 'cash handling' is in the BODY of this posting only; the rule says department.
+    """Was an xfail: an unknown `field` fell back to `all` without a word.
+
+    So `field: department` read title and description together and fired on any
+    mention: 'Store Manager' has department 'Retail Operations', yet the rule fired
+    on the words in the description. Better an error than a wrong and plausible
+    result - so the rule is now refused when the rules are compiled, naming the rule,
+    the value and what is allowed, before any posting is judged.
+    """
     posting = postings["Store Manager"]
-    labels = _rule_engine("department", r"(?i)\bcash handling\b").apply(
-        posting.text, title=posting.title)
-    assert "structured-signal" not in ids(labels)
+    # The precondition that made the fallback harmful: the words ARE in the body, so
+    # a rule read on `all` would fire. Without it, the check below proves nothing.
+    assert re.search(r"(?i)\bcash handling\b", posting.text)
+    assert posting.raw["departments"] == [{"name": "Retail Operations"}]
+    with pytest.raises(ValueError) as refused:
+        _rule_engine("department", r"(?i)\bcash handling\b")
+    message = str(refused.value)
+    assert "rule 'structured-signal'" in message
+    assert "'department'" in message
+    assert "title, body, all" in message

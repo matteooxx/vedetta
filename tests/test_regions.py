@@ -324,3 +324,48 @@ def test_a_regional_grouping_is_still_dropped():
     """And so does the noise list: "US East" must not produce a place called East."""
     from vedetta.places import extract
     assert extract("US East")[0] == []
+
+
+# --- a state code or a preposition is not a country -----------------------
+
+@pytest.mark.parametrize("location,expected", [
+    # Each was acceptable as "EU, via Germany", from a "de" that is a preposition
+    # or Delaware. The real country is excluded by this profile.
+    ("Bogotá D.C., Distrito Capital de Bogotá, Colombia", "excluded"),
+    ("Santo Antônio de Jesus, Bahia, Brazil", "excluded"),
+    ("Seoul, République de Corée", "excluded"),
+    ("Canberra, Territoire de la capitale australienne, Australie", "excluded"),
+    ("USA, DE, Remote", "excluded"),
+    # Nothing else in it says where Dover is, so it is shown rather than guessed -
+    # into Europe, as it was, or into America.
+    ("Dover, DE", "unknown"),
+    ("San Mateo, CA", "unknown"),
+])
+def test_an_invented_country_does_not_decide_the_verdict(profile, location, expected):
+    assert verdict(profile, location) == expected
+    assert "Germany" not in (explain(profile, location) or "")
+
+
+@pytest.mark.parametrize("location,expected,because", [
+    # The real uses of the four codes: the city in the same location carries it.
+    ("Bengaluru, KA, in", "excluded", "inferred from Bengaluru"),
+    ("Berlin, BE, de", "acceptable", "EU"),
+    ("CA-Toronto; CA-Remote", "excluded", "Canada"),
+    ("Remote, US", "excluded", "United States"),
+])
+def test_a_real_use_of_the_four_codes_keeps_its_verdict(profile, location, expected,
+                                                        because):
+    assert verdict(profile, location) == expected
+    assert because in explain(profile, location)
+
+
+def test_the_whole_way_from_the_string_to_workable():
+    """A Bogota posting, as one platform writes it, through to the flag that
+    decides whether the digest shows it in the workable list."""
+    profile = Profile.from_dict({**PROFILE, "exclude_if": ["location-excluded"]})
+    labels = profile.labels_for(
+        "Analyst", "Bogotá D.C., Distrito Capital de Bogotá, Colombia")
+    location = [l for l in labels if l.kind == "geography"]
+    assert [l.rule_id for l in location] == ["location-excluded"]
+    assert "Colombia" in location[0].explain
+    assert profile.is_workable(labels) is False

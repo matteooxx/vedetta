@@ -490,11 +490,12 @@ and the examples cannot drift apart.
 
 ## Found during Phase 2, not fixed (2026-11-13)
 
-Six findings. D1–D5 are not changes in behaviour made by P1–P4; D6 is a limit of rule B
-as P4 and P4b wrote it. Each was read in the code, and where a fact comes from the
-operator's look at production rather than from this repository, it says so.
+Six findings, and a seventh found while closing D1. D1–D5 are not changes in behaviour
+made by P1–P4; D6 is a limit of rule B as P4 and P4b wrote it. Each was read in the
+code, and where a fact comes from the operator's look at production rather than from
+this repository, it says so.
 
-### D1 — `placetree.derive` settles tied votes by the order of a `set`
+### D1 — `placetree.derive` settles tied votes by the order of a `set` **done 2026-11-13: a tie leaves no parent**
 
 For a place with no table parent, the parent country is the one with the most
 co-occurrence votes (`vedetta/placetree.py:61-72`, `:80-86`). The countries of one posting
@@ -504,15 +505,38 @@ are collected in a `set` (`:66`) and iterated to add the votes (`:71`), and
 the chosen country differs **between processes, on identical input**.
 
 The operator ran it with three different `PYTHONHASHSEED` values: the parent of 10 to 21
-places changed between them. (I read the code path above but did **not** reproduce the
-numbers; setting that variable was not possible in this pass.) `rebuild` runs at the end
-of every run and every relabel (`run.py:527`, `:652`), so it happens daily. It can take
+places changed between them. Reproduced on the production copy with seeds 1, 2 and 3:
+21, 10 and 20 places differ pairwise, 24 in all. `rebuild` runs at the end of every run
+and every relabel (`run.py:528`, `:667`), so it happens daily. It can take
 postings out of a view filtered by country, because selecting a country matches what is
 inside it (B11 above).
 
 **Not an effect of P4**: the code is the B11 code, pre-existing. It deserves its own patch.
 
+**Closed: a tie is not a majority for either country, so the place gets no parent.** The
+winner must now have more votes than the runner-up (`placetree.py`, `derive`), and the
+place sits at the top of the location filter under its own name instead of under a
+country nothing in the data preferred. The other way, the alphabetically first country,
+was deterministic too but wrong more often than right. On production there are 27 ties:
+21 are between a real country and one produced by D7 below, the other 6 come from
+postings listing several countries at once (Hong Kong beside Singapore, a pan-European
+list). Alphabetical order would have put Ciudad Mexico under Germany, five US states
+under Israel, San Mateo under Canada and Slovaquie under Belgium, permanently and
+without a sign that it was a guess.
+
+Measured on the production copy against its stored `place_meta`: 800 places had a parent,
+773 now; the 27 that lose it are exactly the tied ones, and none changes to another
+country. 235 postings name one of them, 2 of them in the default view. **5 postings
+drop out of a view filtered by country, none of them in the default view** (open,
+workable), because the others also name the country themselves. Of those 5, four were in
+the wrong country (Brussel under Germany, Slovaquie twice under Greece, a Ho Chi Minh
+posting under Hong Kong) and one in the right one (San Mateo under the United States).
+Three processes with different hash seeds now give an identical tree. The test that
+proves it starts a process per seed, since one process cannot change its own.
+
 ### D2 — `discovered_by` is never updated and `evidence` is never written
+
+**Closed 2026-11-13: both fields now travel in both branches of the upsert** (`vedetta/config.py`, `sync_watchlist`: `evidence` added to the `INSERT`, `discovered_by` and `evidence` added to `DO UPDATE`). `evidence` was already an admitted watchlist key (`configstore.py:183`), so nothing about the shape of the configuration changed. It appears in no source of the live watchlist yet, so the column stays empty in production until the operator writes it. Test: `test_discovered_by_and_evidence_reach_the_database_on_insert_and_update` (`tests/test_source_params.py`); the older test that pinned the old behaviour ("a photograph, not an endorsement") now expects the new value.
 
 `sync_watchlist` inserts `discovered_by` (`vedetta/config.py:165-166`, `:180`) but leaves it
 out of the `DO UPDATE` list (`:169-176`), so an edit in the watchlist never reaches an
@@ -574,6 +598,61 @@ Not fixed in P4b, on purpose: one cause per patch. Today the rule is not in
 becomes a hiding bug the day `seniority-threshold` goes into `exclude_if`. The repair
 would re-apply `compare` to the kept `value` - for the removing direction only, which is
 the one the stored value can decide.
+
+### D7 — A word inside a place name is read as a country code **done 2026-11-13: CA, DE, IL and IN are a country only glued to a city**
+
+Found while closing D1. `places._places_in` looks every word of a fragment up in
+`ALIASES` (`vedetta/places.py`, the token loop), and `ALIASES` holds two-letter country
+codes (`:81`, `:88`, `:90`). So "Ciudad de Mexico" yields Germany from `de`, "San Mateo,
+CA" yields Canada, and a list of US states yields Israel from `IL` and India from `IN`.
+These are the false votes behind 21 of D1's 27 ties on production, and they also
+put the postings themselves into the Germany, Canada, Israel and India filters. Whether
+they reach a location exclusion has **not** been checked. One cause per patch: not
+fixed with D1.
+
+**They did reach the verdict, in the direction that lets postings in.** Germany is in
+the EU, so a `de` that is a preposition ("Distrito Capital de Bogota, Colombia") or
+Delaware ("USA, DE, Remote") made the posting acceptable as "EU, via Germany". The other
+three countries are all excluded by the live profile, and best-verdict-wins meant they
+could only add an exclusion where nothing else had a verdict.
+
+**Closed.** `ca`, `de`, `il` and `in` are no longer in `ALIASES`
+(`vedetta/places.py`). They count as a country only glued to a city by a dash,
+"CA-Toronto", "IN-Bengaluru" - the "GB-London" shape, where a leading code cannot be a
+state or a word (`COUNTRY_ONLY_WHEN_GLUED`, used in `extract`). Elsewhere `CA` and `IL`
+stay as unrecognised places, and `in` and `de` join `NOISE` as the prepositions they
+are: without that, "Remote in Canada" became a place called "In Canada" and lost its
+country. The short codes that collide with nothing (`us`, `uk`, `gb`, `nl`, ...) are
+untouched.
+
+Measured on the production copy (16,933 postings with a location), against the code
+before the patch, with the live profile:
+
+- 594 postings lose Canada, Germany, Israel or India from their places. In 512 nothing
+  else in the posting said that country (599 invented countries: Canada 266, Germany
+  204, Israel 99, India 30). The other 82 were real uses - "Bengaluru, KA, in",
+  "Berlin, BE, de", "Toronto, CA" - and every one also names a city the table places,
+  so the country is still inferred and the verdict is unchanged. Stated beforehand as
+  927 / 202 / 85 / 8; those counted occurrences of the codes, these count postings
+  whose places actually change.
+- **153 verdicts change, every one from acceptable to excluded; none in the other
+  direction.** All 153 were acceptable as "EU, via Germany" and are now judged on the
+  country they name: Colombia 77, Chile 24, Panama 18, United States 13, Mexico 7,
+  South Korea 4, Australia 4, Brazil 3, Argentina 3. 47 are open; **all 47 were
+  already `workable=0`** for another gate, so the default view does not change. 4 had
+  `workable=1`, all closed (Cisco: two in Seoul, two in Mexico City). None has a triage
+  decision.
+- Place tree: 21 places recover a parent (San Mateo and five state codes under the
+  United States, Ciudad Mexico under Mexico, Distrito Capital Bogota under Colombia,
+  ...), 4 lose one: Republique Coree, which was under Germany, and KA, MH and UP, which
+  were under India by co-occurrence with the "in" now gone. Translation pairs found by
+  `dedupe`: unchanged.
+
+Not fixed, same family, one cause per patch: `be` is Belgium in "Berlin, BE, de" (the
+Land of Berlin, 23 postings) and Italian province codes collide too ("Cuneo, CN, Italy"
+is China, "Frosinone, FR, Italy" is France). Measured, none changes a verdict today,
+because each posting also names its real country or city. And "Chicago, IL & New York"
+now yields a place called "IL New York", because `&` does not split.
 
 ---
 

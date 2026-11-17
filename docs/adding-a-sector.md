@@ -88,12 +88,25 @@ file: 14 passed, 5 xfailed.
    `contract-type`). A rule reads only `title`, `body` or `all` (`labels/engine.py:94-102`)
    and `apply()` receives only title and text, so a rule with `field: department` never
    fires on a department held in `raw`. In non-tech sectors it is often the best signal.
-4. **An unknown `field` is not an error** (`:249-261`). It falls back silently to `all`
-   (`labels/engine.py:102`), so `field: department` reads title and description together
-   and fires on any mention in the text. A wrong and plausible result instead of an error.
+4. ~~**An unknown `field` is not an error**~~ — **fixed on 2026-11-17** (`5609799`).
+   Until that day an unknown `field` fell back silently to `all`
+   (`labels/engine.py:102`), so `field: department` read title and description
+   together and fired on any mention in the text: a wrong and plausible result
+   instead of an error. Rules are now **refused when they are compiled**, at the same
+   point where an invalid regex already fails the run, so the interface and the daily
+   run refuse in the same words — and the message names the rule, the offending value
+   and the allowed ones. It also says what cannot be done: a rule reads the title and
+   the advert's text, and cannot be narrowed to a department, a contract type or any
+   other structured field. Not to be confused with `compare.field`, which names a
+   profile number and is not a scope.
 
-Four limits, five tests, because item 3 is parametrized over two fields. This is the
+Three limits, four tests, because item 3 is parametrized over two fields. This is the
 whole list; this page adds none and removes none.
+
+The fourth limit is kept above, struck through, rather than deleted: a guide that
+quietly drops a limit it once documented leaves the next reader unable to tell a
+defect that was fixed from one that nobody ever noticed. What changed is the
+behaviour, and the date and the commit say when.
 
 ## 4. Warning about the shipped lists
 

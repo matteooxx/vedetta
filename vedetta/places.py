@@ -66,6 +66,13 @@ NOISE = {
     # Seen live: one employer writes every location as "Home based - EMEA" or
     # "Home Based - Americas", which produced a place called "Home".
     "home", "home based", "office based", "americas", "apj", "unknown",
+    # Two prepositions, "Remote in Canada" and "Ciudad de Mexico". While they were
+    # read as India and Germany they never reached a name; now that they are not (see
+    # COUNTRY_ONLY_WHEN_GLUED) they would glue themselves to one, and "in Canada" is
+    # not a country. A lone "IN" or "DE" goes too - Indiana or India, Delaware or
+    # Germany - because measured on the live data the rest of the posting always
+    # said which, and no posting was left without a place.
+    "in", "de",
 }
 
 # Variants collapsed so the facet list is short and obvious rather than a long tail
@@ -78,16 +85,16 @@ ALIASES = {
     "great britain": "United Kingdom", "england": "United Kingdom",
     "scotland": "United Kingdom", "wales": "United Kingdom",
     "nl": "Netherlands", "holland": "Netherlands", "the netherlands": "Netherlands",
-    "de": "Germany", "deutschland": "Germany",
+    "deutschland": "Germany",
     "fr": "France", "es": "Spain", "espana": "Spain", "it": "Italy", "italia": "Italy",
     "ie": "Ireland", "eire": "Ireland", "republic of ireland": "Ireland",
     "pt": "Portugal", "be": "Belgium", "lu": "Luxembourg", "at": "Austria",
     "ch": "Switzerland", "se": "Sweden", "dk": "Denmark", "no": "Norway",
     "fi": "Finland", "pl": "Poland", "cz": "Czechia", "czech republic": "Czechia",
     "ro": "Romania", "ee": "Estonia", "lt": "Lithuania", "lv": "Latvia",
-    "ca": "Canada", "in": "India", "sg": "Singapore", "jp": "Japan",
+    "sg": "Singapore", "jp": "Japan",
     "au": "Australia", "nz": "New Zealand", "br": "Brazil", "mx": "Mexico",
-    "il": "Israel", "ae": "United Arab Emirates", "uae": "United Arab Emirates",
+    "ae": "United Arab Emirates", "uae": "United Arab Emirates",
     "za": "South Africa", "cn": "China", "hk": "Hong Kong", "kr": "South Korea",
     "eu": "European Union",
     # Spellings seen live that the title-casing path cannot reach.
@@ -182,6 +189,28 @@ ALIASES.update({
     "stany zjednoczone": "United States", "wlochy": "Italy",
     "wloch": "Italy", "austria pl": "Austria",
 })
+
+# Four country codes that are NOT aliases, because in the postings they mostly mean
+# something else. CA, DE, IL and IN are also the postal codes of California, Delaware,
+# Illinois and Indiana, and "de" and "in" are prepositions. As aliases they turned
+# "San Mateo, CA" into Canada, "Springfield, IL" into Israel, "Ciudad de Mexico" into
+# Germany and "Remote in the US" into India - and the invented Germany is in the EU,
+# so "Bogota, Distrito Capital de Bogota, Colombia" was judged acceptable.
+#
+# Measured on the live data in November 2026: 512 postings carried a country that
+# nothing else in them said, 153 of them judged acceptable on it alone. 82 used one of
+# the four as the real country, and every one of those also named a city that gives
+# the country away - "Berlin, BE, de", "Bengaluru, KA, in", "Toronto, CA" - so the
+# city carries it.
+#
+# So these four count as a country in ONE position: glued to a city by a dash,
+# "CA-Toronto", "IN-Bengaluru" - the platform shape "GB-London" arrives in, where a
+# leading code cannot be a state or a word (see `extract`). Anywhere else CA and IL
+# are kept as written, an unrecognised place like any other, and "in" and "de" are
+# words (see NOISE): "Dover, DE" is Dover, shown as unclear rather than guessed into
+# Europe.
+COUNTRY_ONLY_WHEN_GLUED = {"ca": "Canada", "de": "Germany", "il": "Israel",
+                           "in": "India"}
 
 # Every country name the region tables know, for the whole-fragment check below.
 #
@@ -335,7 +364,9 @@ def extract(location: str | None) -> tuple[list[str], bool, bool]:
             continue
         glued = GLUED.match(fragment)
         if glued:
-            expanded.extend([glued.group(1), glued.group(2)])
+            code, rest = glued.groups()
+            # Glued to a city, a code can only be a country: CA here is Canada.
+            expanded.extend([COUNTRY_ONLY_WHEN_GLUED.get(code.lower(), code), rest])
         else:
             expanded.append(fragment)
 

@@ -32,6 +32,7 @@ from pathlib import Path
 import yaml
 
 from .adapters import ADAPTERS  # the registry itself, see adapters/__init__.py
+from .labels.engine import field_error
 
 try:  # comment-preserving round trip, used only by the editor
     from ruamel.yaml import YAML as _RuamelYAML
@@ -323,7 +324,6 @@ def _validate_rules(doc: dict) -> None:
     if not isinstance(rules, list) or not rules:
         raise ConfigError("'rules' must be a non-empty list")
     seen = set()
-    allowed_fields = {"title", "body", "all"}
     for index, rule in enumerate(rules, 1):
         where = f"rule {index}"
         if not isinstance(rule, dict):
@@ -340,8 +340,11 @@ def _validate_rules(doc: dict) -> None:
             # posting in the digest. A rule nobody can read is a rule nobody can
             # argue with.
             raise ConfigError(f"{where}: missing 'explain' - it is shown in the digest")
-        if "field" in rule and rule["field"] not in allowed_fields:
-            raise ConfigError(f"{where}: 'field' must be one of {sorted(allowed_fields)}")
+        # The engine refuses the same thing with the same words (engine.field_error),
+        # so a file edited by hand fails the run the way the interface would refuse it.
+        problem = field_error(rule)
+        if problem:
+            raise ConfigError(f"{where}: {problem}")
         if "weight" in rule and not isinstance(rule["weight"], int):
             raise ConfigError(f"{where}: 'weight' must be a whole number")
         has_match = any(k in rule for k in ("when", "extract"))

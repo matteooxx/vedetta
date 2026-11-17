@@ -26,6 +26,12 @@ Three rule shapes:
     description's boilerplate. A level or cluster rule usually belongs on the title;
     a gate usually needs the body.
 
+    Any other value is refused when the rules are compiled. It used to read
+    ``all`` instead, so ``field: department`` fired on any mention of the word in
+    the advert while its author believed it read the department. Not to be
+    confused with ``compare.field``, which names a profile number and is not a
+    scope.
+
 ``kind`` / ``severity``
     Carried through to the label. Severity never hides a posting; it only orders it.
 """
@@ -49,6 +55,25 @@ class Label:
     weight: int | None = None   # per-rule override of the severity default
 
 
+# What a rule's top-level `field` may name: the scopes `apply` builds. Not
+# `compare.field`, which is read by `_evaluate_numeric` and names a profile number.
+FIELDS = ("title", "body", "all")
+
+
+def field_error(rule: dict) -> str | None:
+    """Why this rule's `field` cannot be read, or None when it can.
+
+    Shared with configstore, so the interface and the run refuse with one message.
+    A tuple rather than a set, so a list written by mistake is reported, not hashed.
+    """
+    if "field" not in rule or rule["field"] in FIELDS:
+        return None
+    return (f"field {rule['field']!r} is not something a rule can read. 'field' must "
+            f"be one of: {', '.join(FIELDS)} (leave it out for all). A rule reads only "
+            f"the title and the advert's text: it cannot be scoped to department, "
+            f"contract type or any other structured field.")
+
+
 def _patterns(spec: Any) -> list[re.Pattern]:
     """Accept a string, a list of strings, or a list of {matches: ...} mappings."""
     if spec is None:
@@ -69,7 +94,13 @@ class RuleEngine:
         self.profile: dict = config.get("profile") or {}
         self.rules: list[dict] = config.get("rules") or []
         self._compiled = []
-        for rule in self.rules:
+        for index, rule in enumerate(self.rules, 1):
+            # Refused here, before any posting is judged: no posting is ever labelled
+            # by a rule that reads something other than what it says.
+            problem = field_error(rule)
+            if problem:
+                where = f"rule '{rule['id']}'" if rule.get("id") else f"rule {index}"
+                raise ValueError(f"{where}: {problem}")
             self._compiled.append(
                 {
                     "raw": rule,
@@ -99,7 +130,10 @@ class RuleEngine:
             rule = item["raw"]
             if not rule.get("id"):
                 continue
-            subject = scopes.get(rule.get("field", "all"), scopes["all"])
+            # Indexed, not .get with a fallback: __init__ refuses an unknown field,
+            # and a rule edited after compiling raises KeyError rather than reading
+            # everything.
+            subject = scopes[rule.get("field", "all")]
             label = self._evaluate(item, rule, subject)
             if label:
                 labels.append(label)

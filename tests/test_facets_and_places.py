@@ -100,6 +100,39 @@ def test_an_unknown_place_is_kept_rather_than_dropped():
     assert "Ouagadougou" in places and "Burkina Faso" in places
 
 
+@pytest.mark.parametrize("raw,expected", [
+    # A US state code is not a country. Each of these used to gain one.
+    ("San Mateo, CA", ["San Mateo", "CA"]),            # was Canada
+    ("Springfield, IL", ["Springfield", "IL"]),        # was Israel
+    ("Dover, DE", ["Dover"]),                          # was Germany
+    ("Indianapolis, IN", ["Indianapolis"]),            # was India
+    # Nor is a preposition.
+    ("Ciudad de Mexico", ["Ciudad Mexico"]),           # was Germany
+    ("Remote in the US", ["United States"]),           # was India
+    # And taking India away must not glue "in" to the country after it.
+    ("Remote in the US, Remote in Canada", ["United States", "Canada"]),
+])
+def test_a_state_code_or_a_preposition_invents_no_country(raw, expected):
+    """CA, DE, IL and IN are country codes and also US postal codes, and "de" and
+    "in" are words. Read as countries they gave 512 live postings a country nothing
+    else in them said, and because Germany is in the EU, 153 of them - in Bogota,
+    Santiago, Panama - were judged acceptable on it alone."""
+    assert extract(raw)[0] == expected
+
+
+@pytest.mark.parametrize("raw,expected", [
+    # Glued to a city by a dash, the code can only be a country.
+    ("CA-Toronto; CA-Remote", ["Canada", "Toronto"]),
+    ("IN-Bengaluru", ["India", "Bengaluru"]),
+    # And the short codes that collide with nothing are untouched.
+    ("Remote, US", ["United States"]),
+    ("GB-London", ["United Kingdom", "London"]),
+    ("Remote, Canada; Remote, US", ["Canada", "United States"]),
+])
+def test_a_country_code_in_a_country_position_still_resolves(raw, expected):
+    assert extract(raw)[0] == expected
+
+
 # --- facet queries ----------------------------------------------------------
 
 @pytest.fixture()

@@ -163,13 +163,15 @@ def sync_watchlist(conn, watchlist: dict) -> dict:
                      if source.get(name) is not None}
             conn.execute(
                 """INSERT INTO source (employer_id, platform, identifier, endpoint,
-                        job_url_pattern, job_url_exclude, discovered_by, verified_on,
-                        verified_note, enabled, params)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                        job_url_pattern, job_url_exclude, discovered_by, evidence,
+                        verified_on, verified_note, enabled, params)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(employer_id, platform, identifier) DO UPDATE SET
                      endpoint=excluded.endpoint,
                      job_url_pattern=excluded.job_url_pattern,
                      job_url_exclude=excluded.job_url_exclude,
+                     discovered_by=excluded.discovered_by,
+                     evidence=excluded.evidence,
                      verified_on=excluded.verified_on,
                      verified_note=excluded.verified_note,
                      enabled=excluded.enabled,
@@ -178,6 +180,7 @@ def sync_watchlist(conn, watchlist: dict) -> dict:
                     employer_id, platform, str(identifier), source.get("endpoint"),
                     source.get("job_url_pattern"), source.get("job_url_exclude"),
                     source.get("discovered_by") or "config",
+                    source.get("evidence"),
                     str(verified) if verified else None,
                     source.get("verified_note"), int(source.get("enabled", True)),
                     json.dumps(extra, sort_keys=True) if extra else None,

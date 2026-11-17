@@ -83,8 +83,26 @@ def test_a_rule_that_matches_nothing_is_refused():
 def test_bad_field_value_is_refused():
     bad = ("rules:\n  - id: x\n    explain: y\n    severity: info\n"
            "    field: headline\n    when: ['a']\n")
-    with pytest.raises(configstore.ConfigError, match="field"):
+    with pytest.raises(configstore.ConfigError,
+                       match=r"rule 'x': field 'headline' .*title, body, all"):
         configstore.validate("rules", bad)
+
+
+def test_a_list_as_field_is_refused_rather_than_crashing():
+    """The allowed values were a set, so `field: [title]` raised TypeError
+    (unhashable list) instead of a ConfigError the interface can show."""
+    bad = ("rules:\n  - id: x\n    explain: y\n    severity: info\n"
+           "    field: [title]\n    when: ['a']\n")
+    with pytest.raises(configstore.ConfigError, match=r"field \['title'\]"):
+        configstore.validate("rules", bad)
+
+
+def test_compare_field_is_not_checked_as_a_scope():
+    """`compare.field` names a profile number, not what the rule reads."""
+    ok = ("rules:\n  - id: years\n    explain: y\n    severity: warning\n"
+          "    extract: '(\\d+)\\+? years of experience'\n"
+          "    compare: { operator: gt, field: max_years_experience }\n")
+    configstore.validate("rules", ok)
 
 
 def test_watchlist_source_needs_platform_and_identifier():
