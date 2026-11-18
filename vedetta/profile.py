@@ -264,12 +264,17 @@ class Profile:
         if not title:
             return None, None
         lowered = title.lower()
-        for word in self.accept_level:
-            if re.search(rf"\b{re.escape(word)}\b", lowered):
-                return "accept", word
+        # Reject is tested FIRST and wins. A title carrying a word from each list -
+        # "Associate Renewals Manager" - is senior, not junior: the seniority word
+        # is the one that decides. Commit c499800 announced this as one of three
+        # bugs it had fixed and never changed the code; A2 in the backlog, the
+        # changelog, config.html and prompts.py all said reject won while accept did.
         for word in self.reject_level:
             if re.search(rf"\b{re.escape(word)}\b", lowered):
                 return "reject", word
+        for word in self.accept_level:
+            if re.search(rf"\b{re.escape(word)}\b", lowered):
+                return "accept", word
         return None, None
 
     # ----------------------------------------------------------------- labels

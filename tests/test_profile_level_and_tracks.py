@@ -61,17 +61,18 @@ def test_level_verdict_with_empty_lists_is_none():
     assert Profile().level_verdict("Senior Trainee Manager") == (None, None)
 
 
-def test_accept_is_tested_before_reject_when_both_match_different_words():
-    # Today's order: accept first. Pinned so a change of order is visible.
-    assert make_profile().level_verdict("Trainee Manager") == ("accept", "trainee")
+def test_reject_is_tested_before_accept_when_both_match_different_words():
+    # P1b inverted this. Pinned so a change of order is visible, as before: the
+    # seniority word decides, so "Trainee Manager" is a manager.
+    assert make_profile().level_verdict("Trainee Manager") == ("reject", "manager")
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "Resta cosi' fino al passo P1b, che inverte l'ordine (reject prima di accept). "
-    "Quando P1b entra, togliere questo marcatore o la suite diventa rossa: e' voluto."))
 def test_a_word_in_both_lists_reads_as_reject():
     # Real case: `associate` is an accept word, `manager` a reject word.
-    # Commit c499800 announced this as fixed; the code was never changed.
+    # Commit c499800 announced this as fixed and never changed the code. It was an
+    # xfail(strict=True) from T2 until P1b; when the order was inverted the marker
+    # turned the pass into an XPASS failure, which is how the debt announced itself
+    # as paid.
     assert make_profile().level_verdict("Associate Renewals Manager")[0] == "reject"
 
 

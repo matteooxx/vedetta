@@ -27,7 +27,7 @@ project exists to prevent; a fold behind a visible number is not.
 
 Result on live data: **4,617 postings → 273 workable.**
 
-### A2 — Three bugs found by running it **done, except the second: that claim is false**
+### A2 — Three bugs found by running it **done; the second only on 2026-11-17**
 
 - Two `style` attributes on the triage buttons, so the chosen state never rendered.
 - `accept_level` was tested before `reject_level`, which read "Associate Renewals
@@ -56,6 +56,20 @@ Result on live data: **4,617 postings → 273 workable.**
 > The correction arrives with **P1b**, which reverses the order (reject first); until
 > then the bug is open and a title holding words from both lists reads `accept`. When P1b
 > lands, the strict `xfail` above must be removed or the suite goes red; that is intended.
+>
+> **Closed on 2026-11-17 (`68b2b0c`).** P1b is in production: `reject_level` is tested
+> **before** `accept_level`, the strict `xfail` is gone, and the suite went from
+> 581 passed / 5 xfailed to **582 passed / 4 xfailed**. The two bullets above describe
+> the code **until 17 November 2026** and are kept as written, because an entry that
+> quietly changes tense leaves the next reader unable to tell a defect that was closed
+> from one nobody ever noticed.
+>
+> Measured on a coherent copy of the real database before release: of 17511 postings,
+> **one** changed visibility — id 13318, "Associate/ Vice President, AI Infrastructure
+> Engineer", which sat in the default view with **no reason at all** and now reads
+> `the title asks for a level above yours (president)`. **125** postings gained a reason
+> they did not have, and **126** had the label `level-suitable` ("level matches …")
+> replaced by `level-too-senior`. None of them carried a triage decision.
 
 ### A3 — `vedetta relabel` **done**
 

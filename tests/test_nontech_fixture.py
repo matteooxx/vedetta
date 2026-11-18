@@ -192,8 +192,9 @@ def test_retail_wrong_fixture_inverts_both(profile_doc):
     """The two words swapped between the lists: same code, opposite answers.
 
     So the outcome is a fact about configuration, not about the code. (A title holding
-    BOTH words reads accept today because accept is tested first; that is covered by
-    the xfail in test_profile_level_and_tracks.py and is not repeated here.)
+    BOTH words reads reject since 2026-11-17, because reject_level is tested first; the
+    strict xfail that pinned the old order is gone, and the behaviour is asserted in
+    test_profile_level_and_tracks.py, not repeated here.)
     """
     assert _retail_verdicts(profile_doc, ["manager"], ["associate"]) == ("accept", "reject")
 

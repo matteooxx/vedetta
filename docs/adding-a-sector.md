@@ -118,7 +118,9 @@ and Sales Associate accepted; swapped, both invert
 (`test_nontech_fixture.py:175-197`). Rewrite both lists for your trade before trusting
 the workable count.
 
-Separate from the five above, and not a sector limit: a title holding words from **both**
-lists reads `accept` today, because `accept_level` is tested first
-(`profile.py:267-273`). A strict `xfail` pins it until P1b
-(`tests/test_profile_level_and_tracks.py:69-75`).
+Separate from the limits above, and not a sector limit: a title holding words from
+**both** lists used to read `accept`, because `accept_level` was tested first. **Fixed on
+2026-11-17** (`68b2b0c`): `reject_level` is tested **first**, so "Associate/ Vice
+President" is rejected on `president` even though `associate` is an accept word. The
+strict `xfail` that pinned it is gone. For a sector this is the behaviour to count on
+when a title carries a junior word and a senior one at once — the senior one decides.

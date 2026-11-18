@@ -556,3 +556,19 @@ Append-only. One line per change, newest at the bottom.
   nothing lost its location. `docs/adding-a-sector.md` item 4 described this defect as
   present and now records it as fixed, struck through rather than deleted. 538 → 581
   tests passing, 6 → 5 xfail.
+- 2026-11-17 — **P1b: `reject_level` is tested before `accept_level`** (`68b2b0c`), and the
+  correction of 2026-11-13 above is **closed**. That entry said "The fix is P1b, not yet
+  done"; it is done now, and the entry is left as written because it was true on its date.
+  A title carrying words from both lists is now decided by the reject word: "Associate/
+  Vice President" is rejected on `president` even though `associate` is an accept word.
+  The strict `xfail` that pinned the old order (`tests/test_profile_level_and_tracks.py`)
+  is removed, as that entry said it would have to be, and the suite goes from
+  **581 passed / 5 xfailed to 582 passed / 4 xfailed**. Measured on a coherent copy of the
+  real database before release: of 17511 postings **one** changed visibility — id 13318,
+  which sat in the default view with no reason at all and now reads `the title asks for a
+  level above yours (president)` — **125** gained a reason they did not have, and **126**
+  had `level-suitable` replaced by `level-too-senior`. None carried a triage decision.
+  Three documents that described the old order as current are corrected in the same
+  commit: this file, `docs/improvements-backlog.md` under A2, `docs/adding-a-sector.md`,
+  and the docstring of `tests/test_nontech_fixture.py` which pointed at the removed
+  `xfail`. **This closes Phase 2.**
