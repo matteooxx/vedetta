@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 
 from vedetta.labels.engine import Label
-from vedetta.profile import Profile
+from vedetta.profile import Profile, _text_match
 
 
 def make_profile(require_match: bool = False, exclude_if=None) -> Profile:
@@ -95,6 +95,46 @@ def test_location_labels(location, rule_id, kind, severity):
     label = labels[0]
     assert (label.rule_id, label.kind, label.severity) == (rule_id, kind, severity)
     assert label.produced_by == "profile"
+
+
+def place_profile() -> Profile:
+    """Un profilo che esclude l'India, come quello vero, per il caso di Indiana."""
+    return Profile.from_dict({
+        "locations": {
+            "preferred": ["Dublin"],
+            "acceptable": ["Ireland"],
+            "conditional": ["United Kingdom"],
+            "excluded": ["India", "United States"],
+        },
+    })
+
+
+@pytest.mark.parametrize("location, rule_id, hit", [
+    # Il difetto trovato il 18/11/2026 dal controllo del mattino: "india" dentro
+    # "indiana". Il verdetto resta `excluded` perche gli Stati Uniti sono esclusi,
+    # ma la motivazione deve nominare LORO, non l'India.
+    ("Indianapolis, Indiana, United States of America", "location-excluded", "United States"),
+    ("Indiana, United States", "location-excluded", "United States"),
+    # E l'India vera continua a essere riconosciuta.
+    ("Bengaluru, India", "location-excluded", "India"),
+    # I casi che il confronto per sottostringa serviva a prendere: nessuno di loro
+    # ha una lettera accanto al nome, quindi il confine di parola non li perde.
+    ("Remote - Ireland", "location-acceptable", "Ireland"),
+    ("Dublin Hub", "location-preferred", "Dublin"),
+    ("GB-London, United Kingdom", "location-conditional", "United Kingdom"),
+])
+def test_a_place_name_is_matched_as_a_whole_word(location, rule_id, hit):
+    labels = place_profile().labels_for(None, location)
+    assert [l.rule_id for l in labels] == [rule_id]
+    assert hit in labels[0].explain
+
+
+def test_india_is_not_found_inside_indiana():
+    """Il difetto, in forma minima: il nome del paese non entra dentro una parola."""
+    assert not _text_match("india", "indianapolis, indiana")
+    assert _text_match("india", "bengaluru, india")
+    assert not _text_match("us", "prussia")
+    assert _text_match("us", "remote, us")
 
 
 def test_level_too_senior_label():

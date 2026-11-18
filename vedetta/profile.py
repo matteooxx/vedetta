@@ -34,14 +34,24 @@ ORDER = ("preferred", "acceptable", "conditional", "excluded")
 
 
 def _text_match(target: str, text: str) -> bool:
-    """Substring for an ordinary place name, whole word for a short one.
+    """A place name is matched as a whole word, at any length.
 
-    Substring matching is what makes "Ireland" catch "Remote - Ireland" and "Dublin"
-    catch "Dublin Hub", and it is worth keeping. It stops being safe below about four
-    characters: "US" is inside "Prussia" and "EU" is inside "Eusebio".
+    What substring matching was for is still here: "Ireland" catches "Remote - Ireland",
+    "Dublin" catches "Dublin Hub", "London" catches "GB-London". None of those needs a
+    letter on either side of the name, so none of them loses anything from the boundary.
+
+    What the length threshold let through was a name sitting INSIDE a longer word. It
+    was known for short ones - "US" is inside "Prussia", "EU" is inside "Eusebio" - and
+    the fix stopped at four characters. On 18 November 2026 the morning check found the
+    same class above the threshold: seven postings in `Indianapolis, Indiana, United
+    States` read as excluded for **India**, because "india" is inside "indiana". The
+    verdict happened to be right, since the United States are excluded too, but the
+    reason named the wrong country - and four of the seven had that as their ONLY
+    reason, so they would have survived the United States leaving the list.
+
+    A length threshold on a rule like this one is a guess about names nobody has seen
+    yet. The boundary is not.
     """
-    if len(target) > 3:
-        return target in text
     return re.search(rf"(?<![a-z]){re.escape(target)}(?![a-z])", text) is not None
 
 
