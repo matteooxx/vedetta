@@ -112,6 +112,10 @@ def poll(conn, run_id: int, source: dict, seeding: bool = False,
         return "error", [], None
 
     started = time.monotonic()
+    # Built BEFORE the try, so that the `except` branches below can still read what it
+    # wrote down. Constructing an adapter does no I/O - it stores a timeout - so there
+    # is nothing here that can fail and nothing gained by doing it later.
+    adapter = adapter_cls()
     try:
         # Every adapter takes the same two arguments; those whose listing already
         # carries everything ignore them. No detail budget on a first pass: the whole
@@ -124,7 +128,6 @@ def poll(conn, run_id: int, source: dict, seeding: bool = False,
             def on_progress(done, total=None, what="postings"):
                 reporter.progress(employer, done, total, what)
 
-        adapter = adapter_cls()
         items = adapter.fetch(
             source,
             known_keys=known_keys(conn, source["id"]),
@@ -132,16 +135,31 @@ def poll(conn, run_id: int, source: dict, seeding: bool = False,
             progress=on_progress,
         )
     except AdapterError as exc:
+        # The notes go in HERE too, and that is the point of this branch's existence
+        # being spelled out at all. They used to be recorded only on the way out of a
+        # successful poll, so everything the adapter had written down was discarded in
+        # exactly the case a reader would want it: the poll that failed. On
+        # 18 November 2026 four Workday tenants answered 429 for two days, and the
+        # record kept `error / 429 / HTTP 429` while throwing away the adapter's own
+        # account of it - whether a Retry-After was offered, whether it was asked
+        # again, which adverts were refused. A failure with its explanation removed is
+        # the silent-drop failure wearing a different hat.
         _record_poll(conn, run_id, source["id"], "error", exc.http_status, None,
-                     int((time.monotonic() - started) * 1000), str(exc))
+                     int((time.monotonic() - started) * 1000), str(exc),
+                     "; ".join(adapter.notes) or None)
         _set_health(conn, source["id"], "error")
-        return "error", [], None
+        # The note is RETURNED as well as recorded, because the digest is built from
+        # what this function returns, not from the table. Returning None here is how
+        # the reader came to see "FAILED Zendesk (workday)" with no reason under it for
+        # two days while the adapter had written down exactly what happened.
+        return "error", [], "; ".join(adapter.notes) or None
     except Exception as exc:  # unexpected: still recorded, never swallowed
         _record_poll(conn, run_id, source["id"], "error", None, None,
                      int((time.monotonic() - started) * 1000),
-                     f"{type(exc).__name__}: {exc}")
+                     f"{type(exc).__name__}: {exc}",
+                     "; ".join(adapter.notes) or None)
         _set_health(conn, source["id"], "error")
-        return "error", [], None
+        return "error", [], "; ".join(adapter.notes) or None
 
     duration = int((time.monotonic() - started) * 1000)
     # `partial` sits between ok and error: the platform answered and the postings are
@@ -463,6 +481,22 @@ def execute_in(conn, config, run_id: int, reporter=None,
             "outcome": outcome, "count": len(items), "note": note,
             "seeding": source["id"] in seeding_sources,
         })
+        if outcome == "error":
+            # Read back the one field `poll` records but does not return. A 429
+            # explains itself through the note; a dropped connection has no note at
+            # all, and without this the digest prints "FAILED Cantiere (sitemap)" over
+            # nothing while the row beside it says `sitemap unreachable: ConnectError`.
+            # Worse, the line above it now says "the reasons are under SOURCE HEALTH" -
+            # a promise the section would not keep.
+            #
+            # Read back rather than returned because `poll` returns a 3-tuple that six
+            # call sites unpack, and widening it to carry one string the table already
+            # holds would be churn for its own sake.
+            riga = conn.execute(
+                "SELECT error FROM source_poll WHERE run_id=? AND source_id=?",
+                (run_id, source["id"])).fetchone()
+            if riga is not None and riga[0]:
+                report["polls"][-1]["error"] = riga[0]
         untitled: list[str] = []
         unknown: list[str] = []
         for item in items:

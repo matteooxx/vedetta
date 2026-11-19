@@ -17,16 +17,34 @@ from typing import Any
 
 import httpx
 
+# What this says has to be TRUE, because it is a claim made to the people whose
+# servers we are reading, in the one place they will look.
+#
+# It used to end with "one request per employer per day". That was false. A Workday
+# poll sends one listing request plus up to `detail_budget` detail requests - 150 on a
+# normal run (`run.py`), and NO limit on a seeding run - so up to 151 per employer per
+# day, and more the first time. The sitemap adapter fetches a page per advert as well.
+# A quantitative promise nobody checks drifts into a lie the moment the code grows a
+# budget, so what is left is only what the code actually guarantees: there is no
+# concurrency anywhere in the HTTP layer, so the requests do arrive one at a time.
 USER_AGENT = (
     "vedetta/0.1 (self-hosted personal job-posting monitor; "
-    "one request per employer per day)"
+    "requests sent one at a time)"
 )
 
-# Statuses that mean "ask again", not "the answer is no". 429 is the platform telling
-# us to slow down, and 500/502/503/504 are a load balancer or an application having a
-# moment. A 404 is absent from this set on purpose: asking a wrong URL three times
-# does not make it right, and the Workday adapter reads a 404 as a misrecorded tenant
-# rather than a quiet employer.
+# Statuses that mean "ask again", not "the answer is no". 500/502/503/504 are a load
+# balancer or an application having a moment. A 404 is absent from this set on purpose:
+# asking a wrong URL three times does not make it right, and the Workday adapter reads a
+# 404 as a misrecorded tenant rather than a quiet employer.
+#
+# 429 is here CONDITIONALLY, and `retrying` is where the condition lives. A 429 that
+# carries `Retry-After` is what the comment above always assumed: the platform asking us
+# to wait a stated amount, which is worth honouring. A 429 with NO `Retry-After` is
+# something else, and on 18 November 2026 four Workday tenants showed what: a Cloudflare
+# block page, 28,626 bytes of HTML returned with status 429, to a single request sent
+# cold. Nothing was being throttled - the client was being refused. Retrying that twice
+# more asks a server that just said no the same question three times, which is how a
+# polite crawler becomes a blocked one. The exact thing this module says it avoids.
 RETRY_ON = frozenset({429, 500, 502, 503, 504})
 
 # Three attempts in all. Enough to ride out the single blip that is most of what goes
@@ -118,6 +136,40 @@ class Adapter:
         # with something worth saying about it - and Cisco would never have closed a
         # posting again.
         self.incomplete = False
+        self.refusals: list[str] = []
+        self._refusal_note: int | None = None
+
+    def refused(self, what: str) -> None:
+        """A request refused outright, summed up into ONE note rather than many.
+
+        Two reasons it works this way and not by adding a note each time.
+
+        A Workday board whose detail documents are being refused produces one of these
+        PER ADVERT. A real poll of Zalando wrote six copies of the same sentence,
+        1,100 characters for one fact, and this module argues in three other comments
+        that a notice nobody finishes reading is worse than none at all.
+
+        And it lands in `self.notes` rather than in a method of its own because
+        `notes` is the whole surface the caller touches - the suite's stand-in adapters
+        implement `notes` and `incomplete` and nothing else, by design, and a new
+        method here would break twenty-four of them while testing nothing extra. The
+        same reasoning the `retrying` docstring gives for taking a callable.
+        """
+        self.refusals.append(what)
+        n = len(self.refusals)
+        examples = ", ".join(self.refusals[:2])
+        rest = f" and {n - 2} more" if n > 2 else ""
+        if n == 1:
+            subject, tail = "1 request was", "it was"
+        else:
+            subject, tail = f"{n} requests were", "they were"
+        line = (f"{subject} refused with 429 and no Retry-After, so {tail} not "
+                f"asked again: {examples}{rest}")
+        if self._refusal_note is None:
+            self._refusal_note = len(self.notes)
+            self.notes.append(line)
+        else:
+            self.notes[self._refusal_note] = line
 
     def note(self, message: str, incomplete: bool = False) -> None:
         """Record something that went oddly without going wrong.
@@ -136,6 +188,25 @@ class Adapter:
             follow_redirects=True,
             timeout=self.timeout,
         )
+
+    @staticmethod
+    def _retry_note(what: str, shrugged_off: list[str], response) -> str:
+        """What the record should say about a request that took more than one attempt.
+
+        It used to say "the retry is what produced this listing" in every case, which
+        is false whenever the attempts ran out. On 18 November 2026 a real poll of
+        Zalando wrote exactly that about seven adverts whose three attempts had each
+        answered 429: the note claimed a rescue that never happened, in the one place
+        a reader goes to find out whether a board can be trusted.
+
+        So the claim is now made only when the last answer is one the caller can use.
+        """
+        tried = ", ".join(shrugged_off)
+        if response.status_code == 200:
+            return (f"{what} answered {tried} before answering 200; the retry is what "
+                    f"produced this listing")
+        return (f"{what} answered {tried} and then {response.status_code}; "
+                f"the attempts were spent and this is the answer we kept")
 
     def retrying(self, send, what: str, retries: int = RETRIES) -> httpx.Response:
         """Call ``send()`` again if what came back looks transient.
@@ -185,13 +256,29 @@ class Adapter:
             else:
                 if last or response.status_code not in RETRY_ON:
                     if shrugged_off:
-                        self.note(
-                            f"{what} answered {', '.join(shrugged_off)} before "
-                            f"answering {response.status_code}; the retry is what "
-                            f"produced this listing")
+                        self.note(self._retry_note(what, shrugged_off, response))
+                    return response
+                asked_to_wait = _retry_after(response)
+                if response.status_code == 429 and asked_to_wait is None:
+                    # A refusal, not a throttle. See RETRY_ON: a 429 without
+                    # `Retry-After` is what a bot-management page looks like, and
+                    # asking again changes nothing except how many times we knocked.
+                    # The status is returned exactly as the last attempt would have
+                    # returned it, so every caller behaves as before - what changes is
+                    # that the other two requests are never sent.
+                    #
+                    # The note is written even on the FIRST attempt, which is the whole
+                    # difference between this and a silent saving of two requests. The
+                    # Workday detail fetch swallows a non-200 on purpose - the posting
+                    # is kept with fewer labels rather than dropped - so this note is
+                    # the ONLY trace that an advert's text was refused rather than
+                    # absent. Stopping early must not also stop saying so.
+                    self.refused(
+                        what + (f" (after {', '.join(shrugged_off)})"
+                                if shrugged_off else ""))
                     return response
                 shrugged_off.append(f"HTTP {response.status_code}")
-                wait = _retry_after(response) or delay
+                wait = asked_to_wait or delay
 
             time.sleep(wait)
             delay = min(delay * 2, BACKOFF_CAP)

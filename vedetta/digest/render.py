@@ -11,6 +11,7 @@ Two rules govern the layout and neither is cosmetic:
 """
 from __future__ import annotations
 
+import textwrap
 from datetime import datetime, timezone
 
 SEVERITY_MARK = {
@@ -86,7 +87,30 @@ def render_text(report: dict, config=None) -> str:
             lines.append("None that your profile says you could take on. The ones that")
             lines.append("were excluded are listed further down with the reason.")
         else:
-            lines.append("None. Every watched source answered and had nothing new.")
+            # "Every watched source answered" has to be TRUE to be worth printing, and
+            # it was printed unconditionally. On 19 November 2026 a lab run produced a
+            # digest whose subject said "nothing new, 1 source failing" over a body
+            # saying every source had answered: the two halves of the same mail
+            # disagreeing.
+            #
+            # It matters more than a wording slip. When a source fails, "nothing new"
+            # may be nothing new *because of the failure* - and a reader who takes the
+            # sentence at face value reads the gap as quiet. That is the silent drop
+            # this project exists to prevent, arriving as a reassurance.
+            silent = [p for p in (report.get("polls") or [])
+                      if p.get("outcome") in ("error", "empty", "partial")]
+            if silent:
+                # Wrapped to the width of the rules above and below it. The prose in
+                # this file is hand-wrapped at 62 and nothing here wraps on its own, so
+                # a sentence built from a count has to do it itself or it arrives as
+                # one 181-character line in a plain-text mail.
+                lines.extend(textwrap.wrap(
+                    f"None from the sources that answered, and {len(silent)} of "
+                    f"{len(report.get('polls') or [])} did not answer in full - so "
+                    f"this may be short by whatever those would have carried. The "
+                    f"reasons are under SOURCE HEALTH.", width=62))
+            else:
+                lines.append("None. Every watched source answered and had nothing new.")
     for group, heading in ((strong, None), (rest, "Lower ranked - shown, not hidden")):
         if heading and group:
             lines.append("")
@@ -138,8 +162,20 @@ def render_text(report: dict, config=None) -> str:
         counts.append(f"{len(short)} short")
     counts.append(f"{len(bad)} failed")
     lines.append(", ".join(counts) + f", {report['sources']} configured")
+    # The reason goes UNDER the name, exactly as it does for SHORT and NOTE below.
+    # It did not, and failure was the only outcome whose explanation was never
+    # printed - which is backwards, because it is the one the reader can do nothing
+    # about without knowing why. For two days in November 2026 this section said
+    # "4 failed" over four names while the record knew each had answered 429 with no
+    # Retry-After, which is a refusal and not an outage, and means something entirely
+    # different about what to do next.
     for poll in bad:
         lines.append(f"  FAILED  {poll['employer']} ({poll['platform']})")
+        reason = poll.get("error")
+        if reason:
+            lines.append(f"          {reason}")
+        if poll.get("note"):
+            lines.append(f"          {poll['note']}")
     # Its own word, not FAILED. A listing that came back short answered, and its
     # postings are in this digest; what it cannot do is prove a posting has gone, so
     # nothing was closed for that employer. Reported here and not in the subject
